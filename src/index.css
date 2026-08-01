@@ -1,0 +1,449 @@
+@import url('https://fonts.googleapis.com/css2?family=Russo+One&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+    --font-heading: 'Russo One', system-ui, sans-serif;
+    --font-body: 'Russo One', system-ui, sans-serif;
+    --font-display: 'Russo One', system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply text-foreground font-body;
+    background-color: #0b161b;
+  }
+}
+
+/* Game VFX / polish */
+@layer utilities {
+  .upgrade-burst-glow {
+    animation: upgrade-glow-pulse 0.9s ease-in-out;
+  }
+
+  .upgrade-panel-glow {
+    box-shadow: 0 3px 0 0 #000, 0 0 18px rgba(245, 166, 35, 0.55);
+  }
+
+  .ascend-panel-glow {
+    box-shadow: 0 3px 0 0 #000, 0 0 22px rgba(232, 121, 249, 0.55);
+  }
+
+  .avatar-level-flash {
+    animation: avatar-flash 0.7s ease-out;
+  }
+
+  .avatar-shine {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      120deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.45) 50%,
+      transparent 70%
+    );
+    animation: shine-sweep 0.7s ease-out;
+  }
+
+  .char-hero-sheen {
+    background: radial-gradient(ellipse at 50% 0%, rgba(245, 166, 35, 0.25), transparent 60%);
+  }
+
+  .rarity-ring-ssr {
+    box-shadow: 0 0 0 2px #000, 0 0 14px rgba(245, 158, 11, 0.75);
+  }
+
+  .rarity-ring-sr {
+    box-shadow: 0 0 0 2px #000, 0 0 12px rgba(168, 85, 247, 0.65);
+  }
+}
+
+@keyframes upgrade-glow-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  40% {
+    filter: brightness(1.25);
+  }
+}
+
+@keyframes avatar-flash {
+  0% {
+    filter: brightness(1);
+  }
+  35% {
+    filter: brightness(1.55);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@keyframes shine-sweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upgrade-burst-glow,
+  .avatar-level-flash,
+  .avatar-shine {
+    animation: none !important;
+  }
+}
+
+/* Arcade button lift — hover rialzo / press */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):not([aria-disabled="true"]):not([data-no-lift]),
+  [role="button"]:not([aria-disabled="true"]):not([data-no-lift]),
+  a.arcade-btn {
+    transition:
+      transform 0.15s ease-out,
+      filter 0.15s ease-out;
+  }
+
+  button:not(:disabled):not([aria-disabled="true"]):not([data-no-lift]):hover,
+  [role="button"]:not([aria-disabled="true"]):not([data-no-lift]):hover,
+  a.arcade-btn:hover {
+    transform: translateY(-3px);
+  }
+
+  button:not(:disabled):not([aria-disabled="true"]):not([data-no-lift]):active,
+  [role="button"]:not([aria-disabled="true"]):not([data-no-lift]):active,
+  a.arcade-btn:active {
+    transform: translateY(1px);
+    transition-duration: 0.08s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not([data-no-lift]),
+  [role="button"]:not([data-no-lift]),
+  a.arcade-btn {
+    transition: none !important;
+  }
+
+  button:not([data-no-lift]):hover,
+  button:not([data-no-lift]):active,
+  [role="button"]:not([data-no-lift]):hover,
+  [role="button"]:not([data-no-lift]):active,
+  a.arcade-btn:hover,
+  a.arcade-btn:active {
+    transform: none !important;
+  }
+}
+
+/* Battaglia — mano in riga */
+.hand-rail {
+  width: 100%;
+  min-height: 6rem;
+}
+
+.hand-dock {
+  margin-top: auto;
+}
+
+.hand-rail--dragging {
+  outline: 1px dashed rgba(245, 166, 35, 0.35);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+}
+
+/* Sidebars alleati / nemici */
+.battle-sidebar {
+  border-radius: 0.85rem;
+  border: 2px solid #000;
+  background: linear-gradient(180deg, #0d2a2c 0%, #0b161b 100%);
+  box-shadow: 0 3px 0 0 #000;
+  padding: 0.35rem 0.25rem 0.5rem;
+}
+
+.battle-sidebar__label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #f5a623;
+  opacity: 0.85;
+  margin-bottom: 0.15rem;
+}
+
+.battle-sidebar--ally .battle-sidebar__label,
+.battle-sidebar--enemy .battle-sidebar__label {
+  writing-mode: horizontal-tb;
+  transform: none;
+  margin-bottom: 0.25rem;
+}
+
+/* Linea di metà campo — separa zona nemica / giocatore */
+.battle-midline {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 100%;
+  padding: 0.55rem 0.15rem;
+}
+
+.battle-midline__rule {
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #164446 12%,
+    #f5a623 50%,
+    #164446 88%,
+    transparent 100%
+  );
+  box-shadow: 0 1px 0 #000;
+}
+
+/* Slot azione turno */
+.action-slots-bar {
+  width: 100%;
+  border-radius: 0.85rem;
+  border: 2px solid #000;
+  background: linear-gradient(180deg, #0d2a2c 0%, #0b161b 100%);
+  box-shadow: 0 3px 0 0 #000;
+  padding: 0.4rem 0.5rem 0.55rem;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.action-slots-bar--compact {
+  padding: 0.3rem 0.25rem 0.4rem;
+}
+
+.action-slots-bar--over {
+  border-color: #f5a623;
+  box-shadow: 0 3px 0 0 #000, 0 0 14px rgba(245, 166, 35, 0.35);
+}
+
+.action-slots-bar--ready {
+  cursor: pointer;
+  border-color: #f5a623;
+}
+
+.action-slots-bar--ready:hover {
+  box-shadow: 0 3px 0 0 #000, 0 0 12px rgba(245, 166, 35, 0.4);
+}
+
+.action-slot {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 6.5rem;
+  height: 4.25rem;
+  border-radius: 0.75rem;
+  border: 2px solid #000;
+  overflow: hidden;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.action-slot--compact {
+  flex: 0 0 auto;
+  width: 3.35rem;
+  max-width: 3.35rem;
+  height: 3.35rem;
+}
+
+.action-slot--returnable {
+  cursor: pointer;
+}
+
+.action-slot--returnable:hover {
+  transform: translateY(-2px);
+}
+
+.action-slot__index {
+  position: absolute;
+  left: 0.25rem;
+  top: 0.15rem;
+  z-index: 2;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.action-slot__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.35rem 0.25rem 0.25rem;
+  min-width: 0;
+}
+
+.action-slot--empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    #0b161b,
+    #0b161b 6px,
+    #0d2a2c 6px,
+    #0d2a2c 12px
+  );
+  border-style: dashed;
+  border-color: #164446;
+}
+
+.action-slot--empty .action-slot__dash {
+  width: 1.25rem;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(245, 166, 35, 0.35);
+}
+
+.action-slot--move {
+  background: linear-gradient(160deg, #164446 0%, #0b161b 100%);
+  border-color: #f5a623;
+  animation: action-slot-pulse 1.1s ease-in-out infinite;
+}
+
+.action-slot__body--move .action-slot__label {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f5a623;
+}
+
+.action-slot--play {
+  background: linear-gradient(160deg, #1a3a3c 0%, #0b161b 100%);
+  border-color: #f5a623;
+}
+
+.action-slot__art {
+  width: 1.5rem;
+  height: 2rem;
+  overflow: hidden;
+  border-radius: 0.25rem;
+  border: 2px solid #f5a623;
+  flex-shrink: 0;
+  background: #0b161b;
+}
+
+.action-slot__stars {
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+.action-slot__name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  padding: 0 0.15rem;
+}
+
+@keyframes action-slot-pulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 rgba(245, 166, 35, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 12px rgba(245, 166, 35, 0.25);
+  }
+}
+
+.skill-card--queued {
+  opacity: 0.92;
+}
+
+.skill-card--dragging {
+  opacity: 0.85;
+  box-shadow: 0 8px 0 0 #000, 0 0 18px rgba(245, 166, 35, 0.45) !important;
+}
