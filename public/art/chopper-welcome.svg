@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" fill="none">
+  <defs>
+    <linearGradient id="tear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <!-- transparent background ? no rect -->
+  <!-- ears -->
+  <ellipse cx="95" cy="125" rx="40" ry="50" fill="#c4a484" stroke="#000" stroke-width="5"/>
+  <ellipse cx="265" cy="125" rx="40" ry="50" fill="#c4a484" stroke="#000" stroke-width="5"/>
+  <ellipse cx="95" cy="127" rx="20" ry="28" fill="#f5a07a"/>
+  <ellipse cx="265" cy="127" rx="20" ry="28" fill="#f5a07a"/>
+  <!-- antlers -->
+  <path d="M125 58 L125 28 M125 40 L105 22 M125 36 L140 20" stroke="#8b5a2b" stroke-width="6" stroke-linecap="round"/>
+  <path d="M235 58 L235 28 M235 40 L218 20 M235 36 L255 22" stroke="#8b5a2b" stroke-width="6" stroke-linecap="round"/>
+  <!-- head -->
+  <ellipse cx="180" cy="200" rx="112" ry="108" fill="#e8c9a8" stroke="#000" stroke-width="6"/>
+  <!-- hat -->
+  <ellipse cx="180" cy="105" rx="90" ry="26" fill="#f472b6" stroke="#000" stroke-width="5"/>
+  <path d="M105 105 Q180 68 255 105" fill="#f472b6" stroke="#000" stroke-width="5"/>
+  <ellipse cx="180" cy="88" rx="54" ry="32" fill="#fb7185" stroke="#000" stroke-width="5"/>
+  <path d="M162 78 L180 98 L198 78 M180 88 L180 108" stroke="#111" stroke-width="7" stroke-linecap="round"/>
+  <!-- eyes -->
+  <ellipse cx="138" cy="185" rx="26" ry="30" fill="#fff" stroke="#000" stroke-width="4"/>
+  <ellipse cx="222" cy="185" rx="26" ry="30" fill="#fff" stroke="#000" stroke-width="4"/>
+  <ellipse cx="141" cy="192" rx="11" ry="13" fill="#1e293b"/>
+  <ellipse cx="225" cy="192" rx="11" ry="13" fill="#1e293b"/>
+  <circle cx="145" cy="186" r="3.5" fill="#fff"/>
+  <circle cx="229" cy="186" r="3.5" fill="#fff"/>
+  <!-- brows -->
+  <path d="M110 155 Q138 148 160 158" stroke="#000" stroke-width="5" stroke-linecap="round"/>
+  <path d="M200 158 Q222 148 250 155" stroke="#000" stroke-width="5" stroke-linecap="round"/>
+  <!-- nose -->
+  <ellipse cx="180" cy="225" rx="20" ry="16" fill="#38bdf8" stroke="#000" stroke-width="4"/>
+  <ellipse cx="173" cy="219" rx="4.5" ry="3.5" fill="#e0f2fe"/>
+  <!-- mouth -->
+  <path d="M152 255 Q180 302 208 255 Q180 274 152 255Z" fill="#7f1d1d" stroke="#000" stroke-width="4"/>
+  <path d="M162 262 Q180 280 198 262" fill="#fda4af"/>
+  <!-- blush -->
+  <ellipse cx="105" cy="230" rx="16" ry="9" fill="#fb7185" opacity="0.55"/>
+  <ellipse cx="255" cy="230" rx="16" ry="9" fill="#fb7185" opacity="0.55"/>
+  <!-- tears -->
+  <path d="M125 210 Q112 255 120 310 Q130 255 138 218Z" fill="url(#tear)" stroke="#000" stroke-width="3"/>
+  <path d="M235 210 Q222 258 230 315 Q240 255 248 218Z" fill="url(#tear)" stroke="#000" stroke-width="3"/>
+  <ellipse cx="122" cy="320" rx="9" ry="13" fill="#38bdf8" stroke="#000" stroke-width="3"/>
+  <ellipse cx="238" cy="325" rx="10" ry="14" fill="#38bdf8" stroke="#000" stroke-width="3"/>
+  <circle cx="128" cy="242" r="3.5" fill="#fff" opacity="0.85"/>
+  <circle cx="242" cy="248" r="3.5" fill="#fff" opacity="0.85"/>
+  <!-- small body hint -->
+  <ellipse cx="180" cy="370" rx="70" ry="38" fill="#e8c9a8" stroke="#000" stroke-width="5"/>
+  <ellipse cx="180" cy="355" rx="48" ry="22" fill="#fff" stroke="#000" stroke-width="4"/>
+  <circle cx="180" cy="355" r="10" fill="#38bdf8" stroke="#000" stroke-width="3"/>
+</svg>
