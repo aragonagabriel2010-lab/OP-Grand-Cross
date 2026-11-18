@@ -18,6 +18,7 @@ import CharacterDetail from "@/pages/CharacterDetail";
 import Inventory from "@/pages/Inventory";
 import Ship from "@/pages/Ship";
 import Kitchen from "@/pages/Kitchen";
+import Friends from "@/pages/Friends";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import UiSfxBridge from "@/components/game/UiSfxBridge";
@@ -157,6 +158,14 @@ const AuthenticatedApp = () => {
         element={
           <ProtectedRoute>
             <Kitchen />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/friends"
+        element={
+          <ProtectedRoute>
+            <Friends />
           </ProtectedRoute>
         }
       />

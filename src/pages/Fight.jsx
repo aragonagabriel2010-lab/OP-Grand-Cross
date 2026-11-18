@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import BottomNav from "@/components/game/BottomNav";
 import GameTopBar from "@/components/game/GameTopBar";
 import { TEAL, AMBER, PANEL } from "@/lib/arcade";
-import { Map, Castle, ChevronRight, Coins, Hexagon, Shirt, Sparkles, Dumbbell } from "lucide-react";
+import { Map, Castle, ChevronRight, Coins, Hexagon, Shirt, Sparkles, Dumbbell, Users } from "lucide-react";
 
 const MODES = [
   {
@@ -23,6 +23,15 @@ const MODES = [
     blurb: "4 percorsi da 10 livelli · reset settimanale · loot scalabile.",
     Icon: Castle,
     accent: "#38bdf8",
+  },
+  {
+    id: "pvp",
+    to: "/friends?tab=pvp",
+    title: "PvP",
+    subtitle: "Libero · Ranked · Amici",
+    blurb: "Ricerca avversario, classifica e premio settimanale per rank.",
+    Icon: Users,
+    accent: "#f472b6",
   },
   {
     id: "practice",

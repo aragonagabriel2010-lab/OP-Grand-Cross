@@ -31,6 +31,7 @@ import {
   Castle,
   Check,
   Trophy,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/use-toast";
@@ -169,6 +170,14 @@ export default function Home() {
       onClick: () => navigate("/kitchen"),
       className: TEAL,
       accent: true,
+    },
+    {
+      id: "friends",
+      label: "Amici",
+      sub: "Sfide · PvP · classifica",
+      Icon: Users,
+      onClick: () => navigate("/friends"),
+      className: TEAL,
     },
   ];
 

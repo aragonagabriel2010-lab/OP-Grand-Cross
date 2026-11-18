@@ -85,6 +85,16 @@ import {
   markFortressClear,
   FORTRESS_LEVELS,
 } from "@/lib/fortress";
+import {
+  PVP_KINDS,
+  matchRewards,
+  applyRatedResult,
+  applyCasualResult,
+  loadPvpState,
+} from "@/lib/pvp";
+import { loadMatch, clearMatch, buildChapterForMatch } from "@/lib/pvpMatch";
+import { buildPublicProfile, publishPublicProfile } from "@/lib/friends";
+import { useAuth } from "@/lib/AuthContext";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ULT_MAX = 6;
@@ -112,13 +122,18 @@ export default function Battle() {
   const hardMode = searchParams.get("mode") === "hard";
   const practiceMode = searchParams.get("mode") === "practice";
   const fortressMode = searchParams.get("mode") === "fortress";
+  const pvpMode = searchParams.get("mode") === "pvp";
+  const pvpKind = searchParams.get("kind") || PVP_KINDS.CASUAL;
   const fortressZoneId = searchParams.get("zone") || "beri";
   const fortressLevel = Math.max(1, Math.min(FORTRESS_LEVELS, Number(searchParams.get("level")) || 1));
   const navigate = useNavigate();
-  const { loading, charMap, owned, playerState, refresh } = useGame();
+  const { loading, charMap, owned, playerState, refresh, patchPlayerState } = useGame();
+  const { user } = useAuth();
 
   const [chapter, setChapter] = useState(null);
   const [fortressLoot, setFortressLoot] = useState(null);
+  const [pvpLoot, setPvpLoot] = useState(null);
+  const pvpMatchRef = useRef(null);
   const [enemies, setEnemies] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
   const [memberHp, setMemberHp] = useState([]);
@@ -362,7 +377,7 @@ export default function Battle() {
     }
     const merged = removeFromHandAndMerge(cardId);
     setActionQueue((q) =>
-      pruneStalePlays(queuePlay(q, cardId, tile), destroyedIdsFromMerges(merged.merges))
+      pruneStalePlays(queuePlay(q, cardId, tile, target), destroyedIdsFromMerges(merged.merges))
     );
     AudioManager.playClick();
   }
@@ -392,7 +407,7 @@ export default function Battle() {
       }
       const merged = removeFromHandAndMerge(draggableId);
       setActionQueue((q) =>
-        pruneStalePlays(queuePlay(q, draggableId, tile), destroyedIdsFromMerges(merged.merges))
+        pruneStalePlays(queuePlay(q, draggableId, tile, target), destroyedIdsFromMerges(merged.merges))
       );
       return;
     }
@@ -415,7 +430,7 @@ export default function Battle() {
   }
 
   function resolveBattleCost(ch = chapter) {
-    if (practiceMode) return 0;
+    if (practiceMode || pvpMode) return 0;
     if (fortressMode) return fortressStaminaCost(fortressLevel);
     return battleStaminaCost(ch, { hard: hardMode });
   }
@@ -424,7 +439,22 @@ export default function Battle() {
     if (loading || initialized) return;
     (async () => {
       let ch;
-      if (fortressMode) {
+      let enemyState = [];
+      if (pvpMode) {
+        const match = loadMatch();
+        if (!match?.opponent?.fighters?.length) {
+          navigate("/friends?tab=pvp");
+          return;
+        }
+        pvpMatchRef.current = match;
+        ch = buildChapterForMatch(match);
+        enemyState = match.opponent.fighters.map((f) => ({
+          ...f,
+          status: emptyStatusBoard(),
+          hp: f.hp ?? f.maxHp,
+          maxHp: f.maxHp,
+        }));
+      } else if (fortressMode) {
         const zone = getFortressZone(fortressZoneId);
         if (!zone) {
           navigate("/fight/fortress");
@@ -443,23 +473,25 @@ export default function Battle() {
         ch = chapters[0];
       }
       if (!ch) { navigate("/"); return; }
-      const enemyChars = ch.enemy_ids.map((id) => charMap[id]).filter(Boolean);
-      const hardMult = practiceMode
-        ? 0.75
-        : fortressMode
-          ? fortressEnemyMult(fortressLevel)
-          : hardMode
-            ? 1.45
-            : 1;
-      const enemyState = enemyChars.map((c) => {
-        const maxHp = Math.round(effectiveHp(c) * hardMult);
-        return {
-          character: c,
-          hp: maxHp,
-          maxHp,
-          status: emptyStatusBoard(),
-        };
-      });
+      if (!pvpMode) {
+        const enemyChars = ch.enemy_ids.map((id) => charMap[id]).filter(Boolean);
+        const hardMult = practiceMode
+          ? 0.75
+          : fortressMode
+            ? fortressEnemyMult(fortressLevel)
+            : hardMode
+              ? 1.45
+              : 1;
+        enemyState = enemyChars.map((c) => {
+          const maxHp = Math.round(effectiveHp(c) * hardMult);
+          return {
+            character: c,
+            hp: maxHp,
+            maxHp,
+            status: emptyStatusBoard(),
+          };
+        });
+      }
 
       const rawTeam = playerState.team || [];
       const activeIds = [rawTeam[0], rawTeam[1], rawTeam[2]].filter(Boolean);
@@ -506,7 +538,7 @@ export default function Battle() {
       setHand(dealt.hand);
       setInitialized(true);
     })();
-  }, [loading, initialized, chapterNumber, charMap, owned, playerState, navigate, hardMode, practiceMode, fortressMode, fortressZoneId, fortressLevel]);
+  }, [loading, initialized, chapterNumber, charMap, owned, playerState, navigate, hardMode, practiceMode, fortressMode, fortressZoneId, fortressLevel, pvpMode, pvpKind]);
 
   function drawIntoHand(count) {
     setHand((prev) => {
@@ -521,7 +553,7 @@ export default function Battle() {
 
   useEffect(() => {
     if (phase !== "intro" || !chapter || !playerState) return;
-    if (practiceMode) {
+    if (practiceMode || pvpMode) {
       setStaminaSpent(true);
       setStaminaCostCharged(0);
       setStaminaError("");
@@ -636,6 +668,12 @@ export default function Battle() {
     beginPlayerPlanning(hand);
     if (practiceMode) {
       pushLog("Practice — nessun costo energia, nessuna ricompensa");
+    } else if (pvpMode) {
+      pushLog(
+        `PvP ${pvpKind === PVP_KINDS.RANKED ? "Ranked" : pvpKind === PVP_KINDS.FRIENDLY ? "Amichevole" : "Libero"} vs ${
+          pvpMatchRef.current?.opponent?.name || "avversario"
+        }`
+      );
     } else if (fortressMode) {
       pushLog(`Fortezza Lv ${fortressLevel} — inizio! (−${cost} energia)`);
     } else {
@@ -663,14 +701,17 @@ export default function Battle() {
         variant: "default",
       });
     }
+    if (pvpMode) clearMatch();
     navigate(
       practiceMode
         ? "/fight"
-        : fortressMode
-          ? `/fight/fortress?zone=${fortressZoneId}`
-          : chapter?.arc_id
-            ? `/fight/story/${chapter.arc_id}`
-            : "/fight/story"
+        : pvpMode
+          ? `/friends?tab=${pvpKind === PVP_KINDS.FRIENDLY ? "friends" : "pvp"}`
+          : fortressMode
+            ? `/fight/fortress?zone=${fortressZoneId}`
+            : chapter?.arc_id
+              ? `/fight/story/${chapter.arc_id}`
+              : "/fight/story"
     );
   }
 
@@ -687,7 +728,7 @@ export default function Battle() {
     const ult2 = [...ultRef.current];
     const mult = comboMultiplier(used.length, used);
     let enemies2 = enemiesRef.current.map((e) => ({ ...e, status: e.status || emptyStatusBoard() }));
-    let tgt = target;
+    let lastHit = target;
     const teamStatus = teamMembers.map((m) => m.status || emptyStatusBoard());
 
     if (used.length === 0) {
@@ -749,12 +790,16 @@ export default function Battle() {
           }
         );
       } else {
-        tgt = aliveEnemyIndex(enemies2, tgt);
-        if (tgt < 0) {
+        // ogni carta tiene il bersaglio scelto al momento della selezione
+        const preferred =
+          Number.isInteger(tile.targetIndex) && tile.targetIndex >= 0
+            ? tile.targetIndex
+            : lastHit;
+        const strikeTarget = aliveEnemyIndex(enemies2, preferred);
+        if (strikeTarget < 0) {
           if (isUlt) ult2[ci] = 0;
           continue;
         }
-        const strikeTarget = tgt;
         await withAbilityMotion(
           {
             side: "ally",
@@ -822,9 +867,9 @@ export default function Battle() {
         }
         if (enemies2[strikeTarget].hp <= 0) {
           pushLog(`${enemies2[strikeTarget].character.char_name} sconfitto!`);
-          tgt = aliveEnemyIndex(enemies2, strikeTarget + 1);
+          lastHit = aliveEnemyIndex(enemies2, strikeTarget + 1);
         } else {
-          tgt = strikeTarget;
+          lastHit = strikeTarget;
         }
       }
     }
@@ -870,7 +915,7 @@ export default function Battle() {
       return;
     }
 
-    setTarget(Math.max(0, aliveEnemyIndex(enemies2, tgt)));
+    setTarget(Math.max(0, aliveEnemyIndex(enemies2, lastHit)));
 
     await sleep(250);
     await enemyTurn(enemies2);
@@ -936,6 +981,7 @@ export default function Battle() {
     if (busy || phase === "win" || phase === "lose" || phase === "intro" || phase === "loading") return;
     recordBattleResult(false);
     await endFoodBuffBattle();
+    if (pvpMode) await settlePvp(false);
     setLunge(null);
     setStruck(null);
     setPhase("lose");
@@ -1027,6 +1073,9 @@ export default function Battle() {
     }));
     const teamStatus = teamMembers.map((m) => m.status || emptyStatusBoard());
 
+    const focusHits = {};
+    const teamCharacters = teamMembers.map((m) => m?.character || null);
+
     for (let ei = 0; ei < enemies2.length; ei++) {
       const enemy = enemies2[ei];
       if (enemy.hp <= 0) continue;
@@ -1039,7 +1088,10 @@ export default function Battle() {
       const targets = aliveMembers();
       if (targets.length === 0) break;
 
-      const action = chooseEnemyAction(enemy, targets, memberHpRef.current, memberMaxHpRef.current);
+      const action = chooseEnemyAction(enemy, targets, memberHpRef.current, memberMaxHpRef.current, {
+        focusHits,
+        teamCharacters,
+      });
       if (!action) continue;
       const { move, kind, targetIndex, stunEffect } = action;
 
@@ -1088,6 +1140,7 @@ export default function Battle() {
       }
 
       const defIdx = targetIndex >= 0 ? targetIndex : targets[0];
+      focusHits[defIdx] = (focusHits[defIdx] || 0) + 1;
       if (hasCrowdControl(teamStatus[defIdx])) {
         // target stordito: colpisci comunque (il CC alleato non blocca ricevere danno)
       }
@@ -1143,13 +1196,74 @@ export default function Battle() {
       await sleep(300);
       recordBattleResult(false);
       await endFoodBuffBattle();
+      if (pvpMode) await settlePvp(false);
       setPhase("lose");
     }
+  }
+
+  async function settlePvp(won) {
+    const match = pvpMatchRef.current || loadMatch();
+    if (!match || !playerState) return null;
+    const uid = playerState.created_by_id || playerState.id;
+    const kind = match.kind || pvpKind;
+    let rating = loadPvpState(uid).rating;
+    let ratingDelta = 0;
+
+    if (kind === PVP_KINDS.RANKED) {
+      const rated = applyRatedResult(uid, {
+        won,
+        opponentRating: match.opponent?.rating || rating,
+      });
+      rating = rated.state.rating;
+      ratingDelta = rated.delta;
+    } else if (kind === PVP_KINDS.CASUAL) {
+      applyCasualResult(uid, won);
+    }
+
+    const rewards = matchRewards(kind, { won, rating });
+    const patch = {};
+    if (rewards.berry) patch.berry = (playerState.berry || 0) + rewards.berry;
+    if (rewards.strawberry) patch.strawberry = (playerState.strawberry || 0) + rewards.strawberry;
+    if (Object.keys(patch).length) {
+      patchPlayerState?.(patch);
+      await db.entities.PlayerState.update(playerState.id, patch);
+    }
+
+    const loot = {
+      ...rewards,
+      ratingDelta,
+      rating,
+      kind,
+      opponentName: match.opponent?.name || "Avversario",
+    };
+    setPvpLoot(loot);
+    pushLog(rewards.label + (ratingDelta ? ` · LP ${ratingDelta > 0 ? "+" : ""}${ratingDelta}` : ""));
+
+    try {
+      const profile = buildPublicProfile({
+        uid,
+        displayName: user?.full_name || user?.displayName || user?.email?.split("@")[0] || "Capitano",
+        playerState: { ...playerState, ...patch },
+        owned,
+        charMap,
+      });
+      await publishPublicProfile(profile);
+    } catch {
+      /* ignore */
+    }
+    clearMatch();
+    refresh?.();
+    return loot;
   }
 
   async function grantRewards() {
     await endFoodBuffBattle();
     if (!chapter || practiceMode) return;
+
+    if (pvpMode) {
+      await settlePvp(true);
+      return;
+    }
 
     if (fortressMode) {
       const rewards = rollFortressRewards(fortressZoneId, fortressLevel);
@@ -1317,12 +1431,22 @@ export default function Battle() {
           <div className="pointer-events-none absolute inset-x-11 top-0 flex flex-col items-center text-center">
             <div className="battle-title-plaque">
               <h2 className="battle-chrome-title">
-                {practiceMode ? "Practice" : chapter?.title}
+                {practiceMode ? "Practice" : pvpMode ? chapter?.title || "PvP" : chapter?.title}
               </h2>
             </div>
-            {(practiceMode || hardMode || fortressMode) && (
+            {(practiceMode || hardMode || fortressMode || pvpMode) && (
               <span className={cn("battle-mode-banner", hardMode && !practiceMode && "battle-mode-banner--hard")}>
-                {practiceMode ? "Nessun costo" : fortressMode ? `Lv ${fortressLevel}` : "Hard"}
+                {practiceMode
+                  ? "Nessun costo"
+                  : pvpMode
+                    ? pvpKind === PVP_KINDS.RANKED
+                      ? "Ranked"
+                      : pvpKind === PVP_KINDS.FRIENDLY
+                        ? "Amichevole"
+                        : "Libero"
+                    : fortressMode
+                      ? `Lv ${fortressLevel}`
+                      : "Hard"}
               </span>
             )}
           </div>
@@ -1646,10 +1770,15 @@ export default function Battle() {
             className="absolute inset-0 z-30 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm">
             <motion.div initial={{ y: 40 }} animate={{ y: 0 }} className={`w-full max-w-md rounded-2xl ${TEAL} ${PANEL} p-5`}>
               <p className="text-[10px] uppercase tracking-widest text-[#f5a623]">
-                {practiceMode ? "Allenamento" : chapter?.subtitle}
+                {practiceMode
+                  ? "Allenamento"
+                  : pvpMode
+                    ? pvpMatchRef.current?.opponent?.name || chapter?.subtitle
+                    : chapter?.subtitle}
                 {hardMode ? " · HARD" : ""}
                 {fortressMode ? " · FORTEZZA" : ""}
                 {practiceMode ? " · PRACTICE" : ""}
+                {pvpMode ? " · PVP" : ""}
               </p>
               <h3 className="mt-1 text-xl uppercase tracking-wide text-white">
                 {practiceMode ? "Practice" : chapter?.title}
@@ -1664,17 +1793,28 @@ export default function Battle() {
                   Percorso settimanale · più alto = loot migliore
                 </p>
               )}
+              {pvpMode && (
+                <p className="mt-1 text-[10px] uppercase tracking-wide text-[#f472b6]">
+                  {pvpKind === PVP_KINDS.RANKED
+                    ? "Classificata · Fragole in base al rank"
+                    : pvpKind === PVP_KINDS.FRIENDLY
+                      ? "Sfida amichevole · senza ricompense"
+                      : "Libero · Beri a fine partita"}
+                </p>
+              )}
               <p className="mt-3 text-sm leading-relaxed text-white/90">
                 {practiceMode
                   ? "Prova combo, carte e il sub senza consumare energia. Nessuna ricompensa."
-                  : chapter?.dialogue_before}
+                  : pvpMode
+                    ? `Affronta ${pvpMatchRef.current?.opponent?.name || "l'avversario"} con la tua ciurma attiva.`
+                    : chapter?.dialogue_before}
               </p>
               {(() => {
-                if (practiceMode) {
+                if (practiceMode || pvpMode) {
                   return (
                     <>
                       <div className="mt-3 rounded-xl border-2 border-black bg-[#0b161b] px-3 py-2 text-center text-[10px] uppercase text-[#38bdf8]">
-                        Costo 0 · nemici più deboli
+                        {pvpMode ? "Arena · costo 0 energia" : "Costo 0 · nemici più deboli"}
                       </div>
                       <div className="mt-4 flex gap-2">
                         <button
@@ -1753,16 +1893,24 @@ export default function Battle() {
                 <Check className="text-black" size={36} />
               </motion.div>
               <h3 className="text-2xl uppercase tracking-wide text-[#f5a623]">
-                {practiceMode ? "Allenamento ok!" : fortressMode ? `Lv ${fortressLevel} chiaro!` : "Vittoria!"}
+                {practiceMode
+                  ? "Allenamento ok!"
+                  : fortressMode
+                    ? `Lv ${fortressLevel} chiaro!`
+                    : pvpMode
+                      ? "Vittoria PvP!"
+                      : "Vittoria!"}
               </h3>
               <p className="mt-2 text-sm text-white/90">
                 {practiceMode
                   ? "Nessuna ricompensa in Practice."
-                  : fortressLoot
-                    ? fortressLoot.lines.join(" · ")
-                    : chapter?.dialogue_after}
+                  : pvpLoot
+                    ? pvpLoot.label
+                    : fortressLoot
+                      ? fortressLoot.lines.join(" · ")
+                      : chapter?.dialogue_after}
               </p>
-              {!practiceMode && !fortressMode && (
+              {!practiceMode && !fortressMode && !pvpMode && (
               <div className="mt-4 flex justify-center gap-3">
                 <div className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 ${AMBER} ${PANEL} shadow-[0_3px_0_0_#000]`}>
                   <Coins size={16} className="text-black" /> <span className="font-bold text-black">+{chapter?.reward_berry}</span>
@@ -1786,16 +1934,34 @@ export default function Battle() {
                   )}
                 </div>
               )}
+              {pvpMode && pvpLoot && (pvpLoot.berry > 0 || pvpLoot.strawberry > 0) && (
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {pvpLoot.berry > 0 && (
+                    <div className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 ${AMBER} ${PANEL} shadow-[0_3px_0_0_#000]`}>
+                      <Coins size={16} className="text-black" />{" "}
+                      <span className="font-bold text-black">+{pvpLoot.berry}</span>
+                    </div>
+                  )}
+                  {pvpLoot.strawberry > 0 && (
+                    <div className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 ${TEAL} border-2 border-black shadow-[0_3px_0_0_#000]`}>
+                      <Gem size={16} className="text-[#f5a623]" />{" "}
+                      <span className="font-bold text-[#f5a623]">+{pvpLoot.strawberry}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 onClick={() =>
                   navigate(
                     practiceMode
                       ? "/fight"
-                      : fortressMode
-                        ? `/fight/fortress?zone=${fortressZoneId}`
-                        : chapter?.arc_id
-                          ? `/fight/story/${chapter.arc_id}`
-                          : "/fight/story"
+                      : pvpMode
+                        ? `/friends?tab=${pvpKind === PVP_KINDS.FRIENDLY ? "friends" : "pvp"}`
+                        : fortressMode
+                          ? `/fight/fortress?zone=${fortressZoneId}`
+                          : chapter?.arc_id
+                            ? `/fight/story/${chapter.arc_id}`
+                            : "/fight/story"
                   )
                 }
                 className={`mt-5 w-full rounded-2xl py-3 text-base uppercase tracking-wide ${AMBER} ${PANEL}`}
@@ -1814,14 +1980,46 @@ export default function Battle() {
             <motion.div initial={{ scale: 0.8, y: 30 }} animate={{ scale: 1, y: 0 }} className="w-full max-w-md rounded-2xl border-[3px] border-black bg-[#3b0a0a] p-6 text-center shadow-[0_4px_0_0_#000]">
               <Skull className="mx-auto mb-3 text-red-400" size={48} />
               <h3 className="text-2xl uppercase tracking-wide text-red-400">Sconfitta</h3>
-              <p className="mt-2 text-sm text-white/90">La tua ciurma è esausta... Potenzia i tuoi personaggi e riprova!</p>
+              <p className="mt-2 text-sm text-white/90">
+                {pvpLoot?.label ||
+                  "La tua ciurma è esausta... Potenzia i tuoi personaggi e riprova!"}
+              </p>
+              {pvpMode && pvpLoot && (pvpLoot.berry > 0 || pvpLoot.strawberry > 0) && (
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  {pvpLoot.berry > 0 && (
+                    <div className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 ${AMBER} ${PANEL}`}>
+                      <Coins size={14} className="text-black" />
+                      <span className="font-bold text-black">+{pvpLoot.berry}</span>
+                    </div>
+                  )}
+                  {pvpLoot.strawberry > 0 && (
+                    <div className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 ${TEAL} border-2 border-black`}>
+                      <Gem size={14} className="text-[#f5a623]" />
+                      <span className="font-bold text-[#f5a623]">+{pvpLoot.strawberry}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mt-5 flex gap-2">
-                <button onClick={() => navigate("/")} className={`flex-1 rounded-2xl py-3 text-sm uppercase tracking-wide ${TEAL} ${PANEL}`}>
-                  Home
+                <button
+                  onClick={() => navigate(pvpMode ? "/friends?tab=pvp" : "/")}
+                  className={`flex-1 rounded-2xl py-3 text-sm uppercase tracking-wide ${TEAL} ${PANEL}`}
+                >
+                  {pvpMode ? "Arena" : "Home"}
                 </button>
-                <button onClick={retry} className={`flex-1 rounded-2xl py-3 text-sm uppercase tracking-wide ${AMBER} ${PANEL}`}>
-                  <span className="flex items-center justify-center gap-1"><RotateCcw size={16} /> Riprova</span>
-                </button>
+                {!pvpMode && (
+                  <button onClick={retry} className={`flex-1 rounded-2xl py-3 text-sm uppercase tracking-wide ${AMBER} ${PANEL}`}>
+                    <span className="flex items-center justify-center gap-1"><RotateCcw size={16} /> Riprova</span>
+                  </button>
+                )}
+                {pvpMode && (
+                  <button
+                    onClick={() => navigate(`/friends?tab=${pvpKind === PVP_KINDS.FRIENDLY ? "friends" : "pvp"}`)}
+                    className={`flex-1 rounded-2xl py-3 text-sm uppercase tracking-wide ${AMBER} ${PANEL}`}
+                  >
+                    Nuova coda
+                  </button>
+                )}
               </div>
             </motion.div>
           </motion.div>

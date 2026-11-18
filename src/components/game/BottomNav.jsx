@@ -14,7 +14,8 @@ const items = [
       p.startsWith("/fight/") ||
       p === "/story" ||
       p.startsWith("/story/") ||
-      p.startsWith("/battle"),
+      p.startsWith("/battle") ||
+      p.startsWith("/friends"),
   },
   { to: "/gacha", label: "Gacha", icon: Sparkles, match: (p) => p.startsWith("/gacha") },
   {

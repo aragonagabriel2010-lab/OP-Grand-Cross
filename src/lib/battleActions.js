@@ -39,13 +39,23 @@ export function resolvePlayOrder(queue, hand) {
   for (const a of queue || []) {
     if (a.type !== "play") continue;
     const card = a.tile ? { ...a.tile } : byId.get(a.cardId);
-    if (card) used.push(card);
+    if (card) {
+      used.push({
+        ...card,
+        // bersaglio fissato al momento della selezione carta
+        targetIndex: Number.isInteger(a.targetIndex) ? a.targetIndex : card.targetIndex,
+      });
+    }
   }
   return used;
 }
 
-export function queuePlay(queue, cardId, tile) {
+export function queuePlay(queue, cardId, tile, targetIndex = null) {
   if (isCardQueued(queue, cardId)) return queue;
+  const lockedTarget =
+    targetIndex == null || Number.isNaN(Number(targetIndex))
+      ? null
+      : Math.max(0, Number(targetIndex));
   return [
     ...(queue || []),
     {
@@ -53,6 +63,7 @@ export function queuePlay(queue, cardId, tile) {
       type: "play",
       cardId,
       tile: tile ? { ...tile } : null,
+      targetIndex: lockedTarget,
     },
   ];
 }
