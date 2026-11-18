@@ -1,6 +1,7 @@
 /**
  * Sistema mano battaglia stile 7DS:GC
  * — max hand 5/7/9, deal 2-fasi, auto-merge adiacente
+ * — cure/buff: max 3 ogni 6 turni (poi altri 3 dal 7° al 12°, ecc.)
  */
 
 import {
@@ -19,6 +20,20 @@ export const STAR_POWER = {
   2: { damageMult: 1.5, healMult: 1.35, effectPotency: 1.5, label: "Argento" },
   3: { damageMult: 2.15, healMult: 1.7, effectPotency: 2, label: "Oro" },
 };
+
+/** Finestra quota support: turni 1–6, 7–12, 13–18… */
+export const SUPPORT_WINDOW_TURNS = 6;
+/** Max carte heal/buff pescabili per finestra */
+export const SUPPORT_PER_WINDOW = 3;
+
+export function isSupportMove(move) {
+  const t = move?.type;
+  return t === "heal" || t === "buff";
+}
+
+export function supportWindowIndex(turn = 1) {
+  return Math.floor(Math.max(0, (Number(turn) || 1) - 1) / SUPPORT_WINDOW_TURNS);
+}
 
 /** teamSize = PG vivi in squadra (1–3) */
 export function maxHandSize(teamSize) {
@@ -39,6 +54,47 @@ export function buildSkillPool(aliveCharIndexes) {
   return aliveCharIndexes.flatMap((ci) =>
     [0, 1, 2].map((moveIndex) => ({ charIndex: ci, moveIndex }))
   );
+}
+
+/**
+ * @param {(charIndex: number, moveIndex: number) => object|null} resolveMove
+ */
+export function splitPools(aliveCharIndexes, resolveMove) {
+  const pool = buildSkillPool(aliveCharIndexes);
+  const attack = [];
+  const support = [];
+  for (const p of pool) {
+    const move = resolveMove?.(p.charIndex, p.moveIndex);
+    if (isSupportMove(move)) support.push(p);
+    else attack.push(p);
+  }
+  return { pool, attack, support };
+}
+
+function pickPoolEntry(alive, resolveMove, supportDrawn) {
+  const { attack, support, pool } = splitPools(alive, resolveMove);
+  const atCap = supportDrawn >= SUPPORT_PER_WINDOW;
+  let use = atCap ? attack : pool;
+  if (!use.length) use = attack.length ? attack : support.length ? support : pool;
+  if (!use.length) return null;
+  const pick = use[Math.floor(Math.random() * use.length)];
+  const move = resolveMove?.(pick.charIndex, pick.moveIndex);
+  return { pick, isSupport: isSupportMove(move) };
+}
+
+/** Preferisci un'abilità d'attacco del PG; fallback a qualsiasi. */
+function pickAttackForChar(ci, resolveMove) {
+  const opts = [0, 1, 2].filter((mi) => !isSupportMove(resolveMove?.(ci, mi)));
+  if (opts.length) {
+    const moveIndex = opts[Math.floor(Math.random() * opts.length)];
+    return { charIndex: ci, moveIndex, isSupport: false };
+  }
+  const moveIndex = Math.floor(Math.random() * 3);
+  return {
+    charIndex: ci,
+    moveIndex,
+    isSupport: isSupportMove(resolveMove?.(ci, moveIndex)),
+  };
 }
 
 export function cardsMatch(a, b) {
@@ -65,64 +121,94 @@ export function resolveCardStats(character, owned, card) {
 }
 
 /**
- * Apertura partita: più spesso ogni PG riceve una carta per ciascuna abilità (0/1/2).
- * Altrimenti 2 carte casuali per PG, poi riempimento random fino a maxHandSize.
+ * Apertura partita con quota support (cura/buff).
+ * @param {number[]} aliveCharIndexes
+ * @param {{ resolveMove?: Function, supportDrawn?: number }} opts
  */
-export function dealOpeningHand(aliveCharIndexes) {
+export function dealOpeningHand(aliveCharIndexes, opts = {}) {
   const alive = aliveCharIndexes.filter((i) => i != null);
   const max = maxHandSize(alive.length);
+  const resolveMove = opts.resolveMove || (() => null);
+  let supportDrawn = Math.max(0, Number(opts.supportDrawn) || 0);
   const hand = [];
   const preferFullKit = Math.random() < 0.78;
+
+  const pushPick = (charIndex, moveIndex) => {
+    if (hand.length >= max) return;
+    let mi = moveIndex;
+    let support = isSupportMove(resolveMove(charIndex, mi));
+    if (support && supportDrawn >= SUPPORT_PER_WINDOW) {
+      const alt = pickAttackForChar(charIndex, resolveMove);
+      mi = alt.moveIndex;
+      support = alt.isSupport;
+    }
+    if (support && supportDrawn >= SUPPORT_PER_WINDOW) return;
+    hand.push(createBattleTile(charIndex, mi, 1));
+    if (support) supportDrawn += 1;
+  };
 
   if (preferFullKit) {
     for (const ci of alive) {
       for (const moveIndex of shuffle([0, 1, 2])) {
-        if (hand.length >= max) break;
-        hand.push(createBattleTile(ci, moveIndex, 1));
+        pushPick(ci, moveIndex);
       }
     }
   } else {
     for (const ci of alive) {
       const personal = shuffle([0, 1, 2]);
-      hand.push(createBattleTile(ci, personal[0], 1));
-      hand.push(createBattleTile(ci, personal[1], 1));
+      pushPick(ci, personal[0]);
+      pushPick(ci, personal[1]);
     }
   }
 
-  const pool = buildSkillPool(alive);
-  while (hand.length < max && pool.length > 0) {
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    hand.push(createBattleTile(pick.charIndex, pick.moveIndex, 1));
+  while (hand.length < max) {
+    const entry = pickPoolEntry(alive, resolveMove, supportDrawn);
+    if (!entry) break;
+    hand.push(createBattleTile(entry.pick.charIndex, entry.pick.moveIndex, 1));
+    if (entry.isSupport) supportDrawn += 1;
   }
 
-  return resolveAdjacentMerges(shuffle([...hand]));
+  const merged = resolveAdjacentMerges(shuffle([...hand]));
+  return { ...merged, supportDrawn };
 }
 
 /**
  * Pescata a fine turno — default: 2 carte × personaggio vivo.
+ * Rispetta la quota heal/buff della finestra turni corrente.
  */
-export function refillHand(hand, aliveCharIndexes, drawCount) {
+export function refillHand(hand, aliveCharIndexes, drawCountOrOpts, maybeOpts) {
+  const opts =
+    typeof drawCountOrOpts === "object" && drawCountOrOpts != null
+      ? drawCountOrOpts
+      : { drawCount: drawCountOrOpts, ...(maybeOpts || {}) };
+
   const alive = aliveCharIndexes.filter((i) => i != null);
   const max = maxHandSize(alive.length);
   const room = Math.max(0, max - hand.length);
-  const want = drawCount == null ? drawCountForTeam(alive) : drawCount;
+  const want = opts.drawCount == null ? drawCountForTeam(alive) : opts.drawCount;
   const n = Math.min(want, room);
-  if (n <= 0) return resolveAdjacentMerges(hand);
+  const resolveMove = opts.resolveMove || (() => null);
+  let supportDrawn = Math.max(0, Number(opts.supportDrawn) || 0);
 
-  const pool = buildSkillPool(alive);
-  if (pool.length === 0) return resolveAdjacentMerges(hand);
+  if (n <= 0) {
+    const merged = resolveAdjacentMerges(hand);
+    return { ...merged, supportDrawn };
+  }
 
   const drawn = [];
   for (let i = 0; i < n; i++) {
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    drawn.push(createBattleTile(pick.charIndex, pick.moveIndex, 1));
+    const entry = pickPoolEntry(alive, resolveMove, supportDrawn);
+    if (!entry) break;
+    drawn.push(createBattleTile(entry.pick.charIndex, entry.pick.moveIndex, 1));
+    if (entry.isSupport) supportDrawn += 1;
   }
-  return resolveAdjacentMerges([...hand, ...drawn]);
+
+  const merged = resolveAdjacentMerges([...hand, ...drawn]);
+  return { ...merged, supportDrawn };
 }
 
 /**
  * Scansiona da sinistra: se due carte adiacenti matchano → fondi.
- * Ripete per catene (1★+1★→2★, poi eventualmente 2★+2★→3★).
  * @returns {{ hand: Card[], merges: MergeEvent[] }}
  */
 export function resolveAdjacentMerges(hand) {
@@ -152,10 +238,10 @@ export function resolveAdjacentMerges(hand) {
 }
 
 /** Rimuove carte usate per id, poi refill + merge */
-export function afterCardsPlayed(hand, usedIds, aliveCharIndexes, drawCount) {
+export function afterCardsPlayed(hand, usedIds, aliveCharIndexes, drawCountOrOpts) {
   const idSet = new Set(usedIds);
   const remaining = hand.filter((c) => !idSet.has(c.id));
-  return refillHand(remaining, aliveCharIndexes, drawCount);
+  return refillHand(remaining, aliveCharIndexes, drawCountOrOpts);
 }
 
 /** Rimuove tutte le carte di un PG KO, poi compact + merge */

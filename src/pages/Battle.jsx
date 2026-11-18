@@ -31,6 +31,8 @@ import {
   drawCountForTeam,
   resolveAdjacentMerges,
   starLabel,
+  supportWindowIndex,
+  SUPPORT_PER_WINDOW,
 } from "@/lib/battleHand";
 import {
   cloneHand,
@@ -152,6 +154,8 @@ export default function Battle() {
   const ultRef = useRef([]);
   const staminaLockRef = useRef(false);
   const autoFightLockRef = useRef(false);
+  /** Quota cure/buff: 3 ogni 6 turni */
+  const supportQuotaRef = useRef({ window: 0, drawn: 0 });
   const benchRef = useRef(null);
   const openingMembersRef = useRef([]);
   const openingBenchRef = useRef(null);
@@ -205,7 +209,37 @@ export default function Battle() {
   function commitHand(result) {
     setHand(result.hand);
     flashMerges(result.merges);
+    if (typeof result.supportDrawn === "number") {
+      supportQuotaRef.current.drawn = result.supportDrawn;
+    }
     return result.hand;
+  }
+
+  function resolveMoveType(charIndex, moveIndex) {
+    return teamMembers[charIndex]?.character?.moves?.[moveIndex]
+      || openingMembersRef.current?.[charIndex]?.character?.moves?.[moveIndex]
+      || null;
+  }
+
+  /** Allinea la finestra quota (1–6, 7–12, …) al turno corrente. */
+  function syncSupportQuota(forTurn = turn) {
+    const w = supportWindowIndex(forTurn);
+    if (supportQuotaRef.current.window !== w) {
+      supportQuotaRef.current = { window: w, drawn: 0 };
+      if (w > 0) {
+        pushLog(`Finestra support: +${SUPPORT_PER_WINDOW} cure/buff disponibili`);
+      }
+    }
+    return supportQuotaRef.current;
+  }
+
+  function drawOpts(extra = {}) {
+    const quota = syncSupportQuota(extra.turn ?? turn);
+    return {
+      resolveMove: resolveMoveType,
+      supportDrawn: quota.drawn,
+      ...extra,
+    };
   }
 
   /** Togli una carta dalla mano e fondi subito le adiacenze create (gratis). */
@@ -238,7 +272,10 @@ export default function Battle() {
     setHand((prev) => {
       const cleaned = removeCharacterCards(prev, ci);
       const alive = aliveMembers();
-      const result = refillHand(cleaned.hand, alive, drawCountForTeam(alive));
+      const result = refillHand(cleaned.hand, alive, drawOpts({ drawCount: drawCountForTeam(alive) }));
+      if (typeof result.supportDrawn === "number") {
+        supportQuotaRef.current.drawn = result.supportDrawn;
+      }
       flashMerges([...(cleaned.merges || []), ...(result.merges || [])]);
       setActionQueue((q) =>
         pruneStalePlays(prunePlaysForCharacter(q, ci), destroyedIdsFromMerges(result.merges))
@@ -422,7 +459,12 @@ export default function Battle() {
       setBench(subMember);
 
       const aliveIdx = members.map((_, i) => i);
-      const dealt = dealOpeningHand(aliveIdx);
+      supportQuotaRef.current = { window: 0, drawn: 0 };
+      const dealt = dealOpeningHand(aliveIdx, {
+        resolveMove: (ci, mi) => members[ci]?.character?.moves?.[mi] || null,
+        supportDrawn: 0,
+      });
+      supportQuotaRef.current.drawn = dealt.supportDrawn ?? 0;
 
       setTeamMembers(members);
       setMemberMaxHp([...maxes]);
@@ -438,8 +480,11 @@ export default function Battle() {
 
   function drawIntoHand(count) {
     setHand((prev) => {
-      const result = refillHand(prev, aliveMembers(), count);
+      const result = refillHand(prev, aliveMembers(), drawOpts({ drawCount: count }));
       flashMerges(result.merges);
+      if (typeof result.supportDrawn === "number") {
+        supportQuotaRef.current.drawn = result.supportDrawn;
+      }
       return result.hand;
     });
   }
@@ -743,7 +788,12 @@ export default function Battle() {
         remaining.push(createBattleTile(ci, 3, 3));
       }
     }
-    commitHand(refillHand(remaining, alive, drawCountForTeam(alive)));
+    // Fine turno giocatore → la pesca conta già sul turno successivo
+    const nextTurn = turn + 1;
+    syncSupportQuota(nextTurn);
+    commitHand(
+      refillHand(remaining, alive, drawOpts({ drawCount: drawCountForTeam(alive), turn: nextTurn }))
+    );
 
     // Scala buff cibo a durata turni
     tickFoodBuffAfterPlayerTurn();
@@ -1116,8 +1166,14 @@ export default function Battle() {
     setStaminaError("");
     setSubBanner(null);
     setPhase("intro");
+    supportQuotaRef.current = { window: 0, drawn: 0 };
     const aliveIdx = members.map((_, i) => i);
-    commitHand(dealOpeningHand(aliveIdx));
+    commitHand(
+      dealOpeningHand(aliveIdx, {
+        resolveMove: (ci, mi) => members[ci]?.character?.moves?.[mi] || null,
+        supportDrawn: 0,
+      })
+    );
     ultRef.current = members.map(() => 0);
     setUlt(ultRef.current);
   }
