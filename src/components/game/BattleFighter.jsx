@@ -23,12 +23,19 @@ export default function BattleFighter({
   disabled,
   className,
   depth = 0,
+  /** { kind: 'strike'|'support', nudgeX?: number } mentre attacca/cura */
+  lunge = null,
+  struck = false,
 }) {
   const pct = Math.max(0, Math.min(100, (hp / Math.max(1, maxHp)) * 100));
   const ready = ultCharge >= ultMax;
   const isEnemy = side === "enemy";
   const label = (name || character?.char_name || "?").toUpperCase();
   const gemCount = Math.min(5, ultMax || 5);
+  const lunging = alive && !!lunge;
+  const strikeY = isEnemy ? 46 : -52;
+  const supportY = isEnemy ? 14 : -16;
+  const nudgeX = Number(lunge?.nudgeX) || 0;
 
   const Wrapper = onClick ? "button" : "div";
 
@@ -42,9 +49,11 @@ export default function BattleFighter({
         isEnemy ? "battle-fighter--enemy" : "battle-fighter--ally",
         selected && "battle-fighter--selected",
         !alive && "battle-fighter--dead",
+        lunging && "battle-fighter--lunge",
+        struck && "battle-fighter--struck",
         className
       )}
-      style={{ zIndex: 10 + (isEnemy ? depth : 0) }}
+      style={{ zIndex: 10 + (isEnemy ? depth : 0) + (lunging ? 20 : 0) }}
     >
       <p className="battle-fighter__name" title={label}>
         {label}
@@ -54,11 +63,27 @@ export default function BattleFighter({
         <span className="battle-fighter__shadow" aria-hidden="true" />
         <motion.div
           className="battle-fighter__sprite"
-          animate={selected && alive ? { y: [0, -3, 0] } : { y: 0 }}
+          animate={
+            lunging
+              ? {
+                  y: lunge.kind === "support" ? supportY : strikeY,
+                  x: nudgeX,
+                  scale: lunge.kind === "support" ? 1.04 : 1.08,
+                }
+              : struck
+                ? { x: [0, isEnemy ? 7 : -7, 0], y: 0, scale: 1 }
+                : selected && alive
+                  ? { y: [0, -3, 0], x: 0, scale: 1 }
+                  : { y: 0, x: 0, scale: 1 }
+          }
           transition={
-            selected && alive
-              ? { repeat: Infinity, duration: 1.05 }
-              : { duration: 0.2 }
+            lunging
+              ? { type: "spring", stiffness: 420, damping: 22 }
+              : struck
+                ? { duration: 0.28 }
+                : selected && alive
+                  ? { repeat: Infinity, duration: 1.05 }
+                  : { type: "spring", stiffness: 380, damping: 26 }
           }
         >
           <div className="battle-fighter__frame">
@@ -95,7 +120,6 @@ export default function BattleFighter({
         </AnimatePresence>
       </div>
 
-      {/* HUD sotto il ritratto */}
       <div className="battle-fighter__hud">
         <div className="battle-fighter__hp">
           <div

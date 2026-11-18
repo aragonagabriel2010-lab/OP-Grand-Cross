@@ -1062,6 +1062,15 @@
   pointer-events: none;
 }
 
+.battle-fighter--lunge .battle-fighter__shadow {
+  transform: scaleX(1.15);
+  opacity: 0.9;
+}
+
+.battle-fighter--struck .battle-fighter__frame {
+  filter: brightness(1.15);
+}
+
 .battle-fighter__name {
   display: block;
   width: 100%;

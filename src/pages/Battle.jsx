@@ -146,6 +146,10 @@ export default function Battle() {
   /** Sostituto in panchina (entra al primo KO) */
   const [bench, setBench] = useState(null);
   const [subBanner, setSubBanner] = useState(null);
+  /** Affondo attacco/cura: { side, index, kind, nudgeX } */
+  const [lunge, setLunge] = useState(null);
+  /** Bersaglio che riceve l'impatto (shake) */
+  const [struck, setStruck] = useState(null);
 
   const memberHpRef = useRef([]);
   const memberMaxHpRef = useRef([]);
@@ -166,6 +170,32 @@ export default function Battle() {
 
   function pushLog(msg) {
     setLog((l) => [...l.slice(-3), msg]);
+  }
+
+  function lungeNudge(attackerIndex, targetIndex) {
+    const a = Number(attackerIndex) || 0;
+    const t = Number(targetIndex) || 0;
+    return Math.max(-18, Math.min(18, (t - a) * 14));
+  }
+
+  /**
+   * Affondo → impatto (execute) → ritorno.
+   * Una sola unità per volta, in ordine di abilità.
+   */
+  async function withAbilityMotion(
+    { side, index, kind = "strike", targetSide = null, targetIndex = null, nudgeX = 0 },
+    execute
+  ) {
+    setLunge({ side, index, kind, nudgeX });
+    await sleep(kind === "support" ? 220 : 270);
+    if (targetSide != null && targetIndex != null) {
+      setStruck({ side: targetSide, index: targetIndex });
+    }
+    if (typeof execute === "function") await execute();
+    await sleep(110);
+    setStruck(null);
+    setLunge(null);
+    await sleep(kind === "support" ? 130 : 160);
   }
   function addFloater(side, index, dmg, crit) {
     const id = floaterId.current++;
@@ -685,83 +715,116 @@ export default function Battle() {
           move.power * healMultiplier(stars) * (move.type === "heal" ? 1 : 1.5) * fxMult
         );
         const hi = healTargetIndex(ci);
-        if (hi >= 0) {
-          memberHpRef.current[hi] = Math.min(memberMaxHpRef.current[hi], memberHpRef.current[hi] + heal);
-          syncMemberHp();
-          addFloater("team", hi, heal, true);
-        }
-        if (move.type === "buff") {
-          teamStatus[hi >= 0 ? hi : ci] = addEffect(
-            teamStatus[hi >= 0 ? hi : ci],
-            createEffect({ type: EFFECT_TYPES.BUFF_ATK, potency: stars, duration: 2, source: ci })
-          );
-        }
-        for (const fx of effectsFromMove(move, ci)) {
-          teamStatus[hi >= 0 ? hi : ci] = addEffect(teamStatus[hi >= 0 ? hi : ci], fx);
-        }
-        if (isUlt) ult2[ci] = 0;
-        pushLog(`${member.character.char_name} usa ${move.name} (${stars}★)! +${heal} HP`);
-        AudioManager.playHeal();
-        await sleep(450);
+        const supportTarget = hi >= 0 ? hi : ci;
+        await withAbilityMotion(
+          {
+            side: "ally",
+            index: ci,
+            kind: "support",
+            targetSide: "ally",
+            targetIndex: supportTarget,
+            nudgeX: lungeNudge(ci, supportTarget),
+          },
+          async () => {
+            if (hi >= 0) {
+              memberHpRef.current[hi] = Math.min(
+                memberMaxHpRef.current[hi],
+                memberHpRef.current[hi] + heal
+              );
+              syncMemberHp();
+              addFloater("team", hi, heal, true);
+            }
+            if (move.type === "buff") {
+              teamStatus[hi >= 0 ? hi : ci] = addEffect(
+                teamStatus[hi >= 0 ? hi : ci],
+                createEffect({ type: EFFECT_TYPES.BUFF_ATK, potency: stars, duration: 2, source: ci })
+              );
+            }
+            for (const fx of effectsFromMove(move, ci)) {
+              teamStatus[hi >= 0 ? hi : ci] = addEffect(teamStatus[hi >= 0 ? hi : ci], fx);
+            }
+            if (isUlt) ult2[ci] = 0;
+            pushLog(`${member.character.char_name} usa ${move.name} (${stars}★)! +${heal} HP`);
+            AudioManager.playHeal();
+          }
+        );
       } else {
         tgt = aliveEnemyIndex(enemies2, tgt);
         if (tgt < 0) {
           if (isUlt) ult2[ci] = 0;
           continue;
         }
-        const typeMult = damageTypeMultiplier(
-          member.character.attribute,
-          enemies2[tgt].character
+        const strikeTarget = tgt;
+        await withAbilityMotion(
+          {
+            side: "ally",
+            index: ci,
+            kind: "strike",
+            targetSide: "enemy",
+            targetIndex: strikeTarget,
+            nudgeX: lungeNudge(ci, strikeTarget),
+          },
+          async () => {
+            const typeMult = damageTypeMultiplier(
+              member.character.attribute,
+              enemies2[strikeTarget].character
+            );
+            const ultLvMult = isUlt ? ultimateLevelMultiplier(member.owned?.ultimateLevel ?? 1) : 1;
+            const bonus = isUlt ? 1.5 : 1;
+            const raw = Math.round(
+              tileDamage(member.character, member.owned, move, stars) *
+                mult *
+                typeMult *
+                bonus *
+                atkFx *
+                ultLvMult *
+                (foodAtkMultRef.current || 1)
+            );
+            const def = effectiveDefense(enemies2[strikeTarget].character);
+            const defFx = defenseModifierFromEffects(enemies2[strikeTarget].status);
+            const dmg = mitigateDamage(raw, def, defFx);
+            enemies2[strikeTarget] = {
+              ...enemies2[strikeTarget],
+              hp: enemies2[strikeTarget].hp - dmg,
+            };
+            for (const fx of effectsFromMove(move, ci)) {
+              enemies2[strikeTarget] = {
+                ...enemies2[strikeTarget],
+                status: addEffect(enemies2[strikeTarget].status, fx),
+              };
+            }
+            enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
+            const wasCrit = typeMult > 1 || isUlt || stars >= 3;
+            addFloater("enemy", strikeTarget, dmg, wasCrit);
+            AudioManager.playHit(wasCrit);
+            const starTag = stars > 1 ? ` ${stars}★` : "";
+            const tag = typeMult > 1 ? " SUPEREFFICACE!" : typeMult < 1 ? " non molto efficace" : "";
+            pushLog(
+              `${member.character.char_name}: ${isUlt ? "ULTIMA! " : ""}${move.name}${starTag} → ${dmg}${tag}`
+            );
+            if (isUlt) {
+              ult2[ci] = 0;
+              setUltCinematic({
+                id: `u_${Date.now()}`,
+                charName: member.character.char_name,
+                moveName: move.name,
+                dmg,
+              });
+              AudioManager.playUlt();
+            } else if (ult2[ci] < ULT_MAX) {
+              ult2[ci]++;
+            }
+          }
         );
-        const ultLvMult = isUlt ? ultimateLevelMultiplier(member.owned?.ultimateLevel ?? 1) : 1;
-        const bonus = isUlt ? 1.5 : 1;
-        const raw = Math.round(
-          tileDamage(member.character, member.owned, move, stars) *
-            mult *
-            typeMult *
-            bonus *
-            atkFx *
-            ultLvMult *
-            (foodAtkMultRef.current || 1)
-        );
-        const def = effectiveDefense(enemies2[tgt].character);
-        const defFx = defenseModifierFromEffects(enemies2[tgt].status);
-        const dmg = mitigateDamage(raw, def, defFx);
-        enemies2[tgt] = {
-          ...enemies2[tgt],
-          hp: enemies2[tgt].hp - dmg,
-        };
-        for (const fx of effectsFromMove(move, ci)) {
-          enemies2[tgt] = {
-            ...enemies2[tgt],
-            status: addEffect(enemies2[tgt].status, fx),
-          };
-        }
-        enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
-        const wasCrit = typeMult > 1 || isUlt || stars >= 3;
-        addFloater("enemy", tgt, dmg, wasCrit);
-        AudioManager.playHit(wasCrit);
-        const starTag = stars > 1 ? ` ${stars}★` : "";
-        const tag = typeMult > 1 ? " SUPEREFFICACE!" : typeMult < 1 ? " non molto efficace" : "";
-        pushLog(`${member.character.char_name}: ${isUlt ? "ULTIMA! " : ""}${move.name}${starTag} → ${dmg}${tag}`);
         if (isUlt) {
-          ult2[ci] = 0;
-          setUltCinematic({
-            id: `u_${Date.now()}`,
-            charName: member.character.char_name,
-            moveName: move.name,
-            dmg,
-          });
-          AudioManager.playUlt();
-          await sleep(900);
+          await sleep(500);
           setUltCinematic(null);
-        } else {
-          if (ult2[ci] < ULT_MAX) ult2[ci]++;
-          await sleep(420);
         }
-        if (enemies2[tgt].hp <= 0) {
-          pushLog(`${enemies2[tgt].character.char_name} sconfitto!`);
-          tgt = aliveEnemyIndex(enemies2, tgt + 1);
+        if (enemies2[strikeTarget].hp <= 0) {
+          pushLog(`${enemies2[strikeTarget].character.char_name} sconfitto!`);
+          tgt = aliveEnemyIndex(enemies2, strikeTarget + 1);
+        } else {
+          tgt = strikeTarget;
         }
       }
     }
@@ -873,6 +936,8 @@ export default function Battle() {
     if (busy || phase === "win" || phase === "lose" || phase === "intro" || phase === "loading") return;
     recordBattleResult(false);
     await endFoodBuffBattle();
+    setLunge(null);
+    setStruck(null);
     setPhase("lose");
     setBusy(false);
   }
@@ -889,43 +954,56 @@ export default function Battle() {
     let enemies2 = enemiesRef.current.map((e) => ({ ...e }));
     let tgt = aliveEnemyIndex(enemies2, target);
     if (tgt < 0) { setBusy(false); return; }
-    const typeMult = damageTypeMultiplier(member.character.attribute, enemies2[tgt].character);
-    const rawUlt = battleUltimateDamage(
-      member.character,
-      member.owned,
-      ultMove,
-      3,
-      typeMult,
-      1.5
+    let dealtDmg = 0;
+    await withAbilityMotion(
+      {
+        side: "ally",
+        index: charIndex,
+        kind: "strike",
+        targetSide: "enemy",
+        targetIndex: tgt,
+        nudgeX: lungeNudge(charIndex, tgt),
+      },
+      async () => {
+        const typeMult = damageTypeMultiplier(member.character.attribute, enemies2[tgt].character);
+        const rawUlt = battleUltimateDamage(
+          member.character,
+          member.owned,
+          ultMove,
+          3,
+          typeMult,
+          1.5
+        );
+        dealtDmg = mitigateDamage(
+          rawUlt,
+          effectiveDefense(enemies2[tgt].character),
+          defenseModifierFromEffects(enemies2[tgt].status)
+        );
+        enemies2[tgt] = { ...enemies2[tgt], hp: enemies2[tgt].hp - dealtDmg };
+        enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
+        addFloater("enemy", tgt, dealtDmg, true);
+        AudioManager.playUlt();
+        const ultLv = member.owned?.ultimateLevel ?? 1;
+        pushLog(`${member.character.char_name}: ULTIMA! ${ultMove.name} (Lv.${ultLv}) → ${dealtDmg}`);
+        setUltCinematic({
+          id: `u_${Date.now()}`,
+          charName: member.character.char_name,
+          moveName: ultMove.name,
+          dmg: dealtDmg,
+        });
+      }
     );
-    const dmg = mitigateDamage(
-      rawUlt,
-      effectiveDefense(enemies2[tgt].character),
-      defenseModifierFromEffects(enemies2[tgt].status)
-    );
-    enemies2[tgt] = { ...enemies2[tgt], hp: enemies2[tgt].hp - dmg };
-    enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
-    addFloater("enemy", tgt, dmg, true);
-    AudioManager.playUlt();
     void import("@/lib/dailies")
       .then(({ bumpDaily }) => {
         const uid = playerState?.created_by_id || playerState?.id;
         if (uid) bumpDaily(uid, "use_ulti");
       })
       .catch(() => {});
-    const ultLv = member.owned?.ultimateLevel ?? 1;
-    pushLog(`${member.character.char_name}: ULTIMA! ${ultMove.name} (Lv.${ultLv}) → ${dmg}`);
-    setUltCinematic({
-      id: `u_${Date.now()}`,
-      charName: member.character.char_name,
-      moveName: ultMove.name,
-      dmg,
-    });
     const ult3 = [...ultRef.current];
     ult3[charIndex] = 0;
     ultRef.current = ult3;
     setUlt(ult3);
-    await sleep(1100);
+    await sleep(700);
     setUltCinematic(null);
     if (enemies2.every((e) => e.hp <= 0)) {
       recordBattleResult(true);
@@ -967,25 +1045,45 @@ export default function Battle() {
 
       if (kind === "heal") {
         const heal = enemyHealAmount(enemy, move);
-        enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
-        enemiesRef.current = enemies2;
-        setEnemies([...enemies2]);
-        addFloater("enemy", ei, heal, true);
-        AudioManager.playHeal();
-        pushLog(`${enemy.character.char_name}: ${move.name} → +${heal} HP`);
-        await sleep(480);
+        await withAbilityMotion(
+          {
+            side: "enemy",
+            index: ei,
+            kind: "support",
+            targetSide: "enemy",
+            targetIndex: ei,
+          },
+          async () => {
+            enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
+            enemiesRef.current = enemies2;
+            setEnemies([...enemies2]);
+            addFloater("enemy", ei, heal, true);
+            AudioManager.playHeal();
+            pushLog(`${enemy.character.char_name}: ${move.name} → +${heal} HP`);
+          }
+        );
         continue;
       }
 
       if (kind === "buff") {
-        enemy.status = addEffect(
-          enemy.status,
-          createEffect({ type: EFFECT_TYPES.BUFF_DEF, potency: 1, duration: 2, source: ei })
+        await withAbilityMotion(
+          {
+            side: "enemy",
+            index: ei,
+            kind: "support",
+            targetSide: "enemy",
+            targetIndex: ei,
+          },
+          async () => {
+            enemy.status = addEffect(
+              enemy.status,
+              createEffect({ type: EFFECT_TYPES.BUFF_DEF, potency: 1, duration: 2, source: ei })
+            );
+            enemiesRef.current = enemies2;
+            setEnemies([...enemies2]);
+            pushLog(`${enemy.character.char_name}: ${move.name} — difesa potenziata!`);
+          }
         );
-        enemiesRef.current = enemies2;
-        setEnemies([...enemies2]);
-        pushLog(`${enemy.character.char_name}: ${move.name} — difesa potenziata!`);
-        await sleep(420);
         continue;
       }
 
@@ -993,38 +1091,49 @@ export default function Battle() {
       if (hasCrowdControl(teamStatus[defIdx])) {
         // target stordito: colpisci comunque (il CC alleato non blocca ricevere danno)
       }
-      const defender = teamMembers[defIdx];
-      const typeMult = damageTypeMultiplier(enemy.character.attribute, defender.character);
-      const atkFxEnemy = attackModifierFromEffects(enemies2[ei]?.status || enemy.status);
-      const enemyAtkMult = practiceMode
-        ? 0.85
-        : fortressMode
-          ? 0.9 + fortressLevel * 0.06
-          : hardMode
-            ? 1.25
-            : 1;
-      const raw = Math.round(
-        enemyDamage(enemy.character, move) * typeMult * enemyAtkMult * atkFxEnemy
+      await withAbilityMotion(
+        {
+          side: "enemy",
+          index: ei,
+          kind: "strike",
+          targetSide: "ally",
+          targetIndex: defIdx,
+          nudgeX: lungeNudge(ei, defIdx),
+        },
+        async () => {
+          const defender = teamMembers[defIdx];
+          const typeMult = damageTypeMultiplier(enemy.character.attribute, defender.character);
+          const atkFxEnemy = attackModifierFromEffects(enemies2[ei]?.status || enemy.status);
+          const enemyAtkMult = practiceMode
+            ? 0.85
+            : fortressMode
+              ? 0.9 + fortressLevel * 0.06
+              : hardMode
+                ? 1.25
+                : 1;
+          const raw = Math.round(
+            enemyDamage(enemy.character, move) * typeMult * enemyAtkMult * atkFxEnemy
+          );
+          const def = effectiveDefense(defender.character, defender.owned);
+          const defFx = defenseModifierFromEffects(teamStatus[defIdx]);
+          const dmg = mitigateDamage(raw, def, defFx);
+          memberHpRef.current[defIdx] = Math.max(0, memberHpRef.current[defIdx] - dmg);
+          const died = memberHpRef.current[defIdx] <= 0;
+          if (stunEffect) {
+            teamStatus[defIdx] = addEffect(teamStatus[defIdx], stunEffect);
+            pushLog(`${defender.character.char_name} è stordito!`);
+          }
+          syncMemberHp();
+          addFloater("team", defIdx, dmg, typeMult > 1);
+          AudioManager.playHit(typeMult > 1);
+          const tag = typeMult > 1 ? " SUPEREFFICACE!" : typeMult < 1 ? " non molto efficace" : "";
+          pushLog(`${enemy.character.char_name}: ${move.name} → ${dmg}${tag}`);
+          if (died) {
+            onMemberDeath(defIdx);
+            pushLog(`${defender.character.char_name} è KO!`);
+          }
+        }
       );
-      const def = effectiveDefense(defender.character, defender.owned);
-      const defFx = defenseModifierFromEffects(teamStatus[defIdx]);
-      const dmg = mitigateDamage(raw, def, defFx);
-      memberHpRef.current[defIdx] = Math.max(0, memberHpRef.current[defIdx] - dmg);
-      const died = memberHpRef.current[defIdx] <= 0;
-      if (stunEffect) {
-        teamStatus[defIdx] = addEffect(teamStatus[defIdx], stunEffect);
-        pushLog(`${defender.character.char_name} è stordito!`);
-      }
-      syncMemberHp();
-      addFloater("team", defIdx, dmg, typeMult > 1);
-      AudioManager.playHit(typeMult > 1);
-      const tag = typeMult > 1 ? " SUPEREFFICACE!" : typeMult < 1 ? " non molto efficace" : "";
-      pushLog(`${enemy.character.char_name}: ${move.name} → ${dmg}${tag}`);
-      if (died) {
-        onMemberDeath(defIdx);
-        pushLog(`${defender.character.char_name} è KO!`);
-      }
-      await sleep(480);
     }
 
     setTeamMembers((tm) => tm.map((m, i) => ({ ...m, status: teamStatus[i] })));
@@ -1165,6 +1274,8 @@ export default function Battle() {
     setStaminaSpent(false);
     setStaminaError("");
     setSubBanner(null);
+    setLunge(null);
+    setStruck(null);
     setPhase("intro");
     supportQuotaRef.current = { window: 0, drawn: 0 };
     const aliveIdx = members.map((_, i) => i);
@@ -1256,6 +1367,10 @@ export default function Battle() {
                     {enemies.map((e, i) => {
                       const alive = e.hp > 0;
                       const isTarget = target === i && alive && planning;
+                      const enemyLunge =
+                        lunge?.side === "enemy" && lunge.index === i
+                          ? { kind: lunge.kind, nudgeX: lunge.nudgeX }
+                          : null;
                       return (
                         <BattleFighter
                           key={i}
@@ -1270,6 +1385,8 @@ export default function Battle() {
                           floaters={floaters.filter((f) => f.side === "enemy" && f.index === i)}
                           disabled={!alive || !planning}
                           onClick={() => setTarget(i)}
+                          lunge={enemyLunge}
+                          struck={struck?.side === "enemy" && struck.index === i}
                         />
                       );
                     })}
@@ -1291,6 +1408,10 @@ export default function Battle() {
                       const hp = memberHp[i] || 0;
                       const max = memberMaxHp[i] || 1;
                       const dead = hp <= 0;
+                      const allyLunge =
+                        lunge?.side === "ally" && lunge.index === i
+                          ? { kind: lunge.kind, nudgeX: lunge.nudgeX }
+                          : null;
                       return (
                         <BattleFighter
                           key={i}
@@ -1305,6 +1426,8 @@ export default function Battle() {
                           alive={!dead}
                           depth={i}
                           floaters={floaters.filter((f) => f.side === "team" && f.index === i)}
+                          lunge={allyLunge}
+                          struck={struck?.side === "ally" && struck.index === i}
                         />
                       );
                     })}
