@@ -710,126 +710,175 @@
 }
 
 /*
- * Carte compatte in base alla LARGHEZZA DELLA MANO (non viewport):
- * la battaglia è max-w-lg, quindi anche in preview desktop le carte scalano.
+ * PC / tablet: carte grandi (il pannello battaglia è max-w-lg ~512px,
+ * quindi queste regole container restano “desktop”).
  */
 @container battle-hand (max-width: 540px) {
   .hand-rail {
-    min-height: 7.6rem;
-    gap: 0;
-    padding-top: 0.4rem;
-    padding-bottom: 0.35rem;
-    padding-left: 0.15rem;
-    padding-right: 0.15rem;
+    min-height: 12.2rem;
+    gap: 0.22rem;
+    padding-top: 0.85rem;
+    padding-bottom: 0.75rem;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
     justify-content: center;
     flex-wrap: nowrap;
-    overflow-x: hidden;
+    overflow-x: auto;
     overflow-y: visible;
+    scrollbar-width: none;
+  }
+
+  .hand-rail::-webkit-scrollbar {
+    display: none;
   }
 
   .hand-card-fan--overlap {
-    margin-left: -0.85rem;
-  }
-
-  .hand-card-fan:first-child {
-    margin-left: 0;
+    margin-left: 0.15rem;
   }
 
   .skill-card-7ds {
-    height: 7.15rem;
-    width: 3.55rem;
-    border-radius: 0.65rem;
-    border-width: 2px;
+    height: 11.4rem;
+    width: 6rem;
+    border-radius: 1rem;
+    border-width: 3px;
   }
 
   .skill-card-7ds__pips {
-    padding-top: 0.1rem;
-    gap: 0;
+    padding-top: 0.18rem;
+    gap: 1px;
   }
 
   .skill-card-7ds__pip {
-    font-size: 8px;
+    font-size: 11px;
   }
 
   .skill-card-7ds__art {
-    height: 2.55rem;
-    width: 2.95rem;
-    margin-top: 0.02rem;
-    border-radius: 0.32rem;
+    height: 4.1rem;
+    width: 4.7rem;
+    margin-top: 0.06rem;
+    border-radius: 0.45rem;
   }
 
   .skill-card-7ds__name {
-    margin-top: 0.06rem;
-    min-height: 2.1em;
-    max-height: 2.3em;
-    padding: 0 0.08rem;
-    font-size: 7px !important;
+    margin-top: 0.12rem;
+    min-height: 2.25em;
+    max-height: 2.45em;
+    padding: 0 0.14rem;
+    font-size: 9.5px !important;
   }
 
   .skill-card-7ds__cat {
-    margin-top: 0.08rem;
-    padding: 0.1rem 0.28rem;
-    font-size: 7px;
+    margin-top: 0.14rem;
+    padding: 0.16rem 0.4rem;
+    font-size: 9px;
   }
 
   .skill-card-7ds__footer {
-    padding: 0.06rem 0.16rem 0.18rem;
+    padding: 0.12rem 0.25rem 0.3rem;
   }
 
   .skill-card-7ds__type-badge {
-    height: 1.15rem;
-    width: 1.15rem;
-    border-radius: 0.28rem;
+    height: 1.55rem;
+    width: 1.55rem;
+    border-radius: 0.36rem;
   }
 
   .skill-card-7ds__type-badge svg {
-    width: 11px;
-    height: 11px;
+    width: 15px;
+    height: 15px;
   }
 
   .skill-card-7ds__adv {
-    top: 3.2rem;
-    font-size: 9px;
+    top: 5rem;
+    font-size: 12px;
   }
 }
 
-@container battle-hand (max-width: 380px) {
+/*
+ * Solo telefono (viewport): carte compatte + overlap.
+ * Non usare @container qui: max-w-lg farebbe restringere anche il PC.
+ */
+@media (max-width: 480px) {
+  .hand-rail {
+    min-height: 7.4rem !important;
+    gap: 0 !important;
+    padding-top: 0.35rem !important;
+    padding-bottom: 0.3rem !important;
+    padding-left: 0.1rem !important;
+    padding-right: 0.1rem !important;
+    overflow-x: hidden !important;
+  }
+
   .hand-card-fan--overlap {
-    margin-left: -1.05rem;
+    margin-left: -0.95rem !important;
+  }
+
+  .hand-card-fan:first-child {
+    margin-left: 0 !important;
   }
 
   .skill-card-7ds {
-    height: 6.5rem;
-    width: 3.15rem;
+    height: 6.9rem !important;
+    width: 3.35rem !important;
+    border-radius: 0.65rem !important;
+    border-width: 2px !important;
+  }
+
+  .skill-card-7ds__pip {
+    font-size: 8px !important;
   }
 
   .skill-card-7ds__art {
-    height: 2.25rem;
-    width: 2.6rem;
+    height: 2.45rem !important;
+    width: 2.85rem !important;
+    border-radius: 0.32rem !important;
+  }
+
+  .skill-card-7ds__name {
+    font-size: 7px !important;
+    min-height: 2.1em !important;
+    max-height: 2.3em !important;
+    padding: 0 0.08rem !important;
+  }
+
+  .skill-card-7ds__cat {
+    font-size: 7px !important;
+    padding: 0.1rem 0.28rem !important;
+  }
+
+  .skill-card-7ds__type-badge {
+    height: 1.15rem !important;
+    width: 1.15rem !important;
+  }
+
+  .skill-card-7ds__type-badge svg {
+    width: 11px !important;
+    height: 11px !important;
+  }
+
+  .skill-card-7ds__adv {
+    top: 3.1rem !important;
+    font-size: 9px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .hand-card-fan--overlap {
+    margin-left: -1.1rem !important;
+  }
+
+  .skill-card-7ds {
+    height: 6.35rem !important;
+    width: 3.05rem !important;
+  }
+
+  .skill-card-7ds__art {
+    height: 2.2rem !important;
+    width: 2.55rem !important;
   }
 
   .skill-card-7ds__name {
     font-size: 6.5px !important;
-  }
-
-  .skill-card-7ds__cat {
-    font-size: 6.5px;
-  }
-}
-
-/* Fallback viewport mobile */
-@media (max-width: 480px) {
-  .hand-card-fan--overlap {
-    margin-left: -0.95rem;
-  }
-
-  .hand-card-fan:first-child {
-    margin-left: 0;
-  }
-
-  .skill-card-7ds {
-    height: 6.9rem;
-    width: 3.35rem;
   }
 }
 
