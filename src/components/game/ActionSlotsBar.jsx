@@ -1,12 +1,12 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeftRight, Move, Anchor } from "lucide-react";
+import { ArrowLeftRight, Move } from "lucide-react";
 import { STAR_RANKS } from "@/lib/gameUtils";
 import { CharacterArt } from "@/components/game/CharacterCard";
 import { TEAL, AMBER } from "@/lib/arcade";
 import { cn } from "@/lib/utils";
 
 /**
- * Pedane d'azione + COMBATTI + SUB (solo se c'è riserva).
+ * Pedane d'azione + SUB. A slot pieni il combattimento parte da solo.
  */
 export default function ActionSlotsBar({
   maxSlots,
@@ -15,9 +15,7 @@ export default function ActionSlotsBar({
   bench = null,
   dropProvided,
   isDraggingOver,
-  canConfirm = false,
   slotsFull = false,
-  onConfirm,
   className,
 }) {
   const slots = Array.from({ length: Math.max(0, maxSlots) }, (_, i) => actionQueue[i] || null);
@@ -51,13 +49,20 @@ export default function ActionSlotsBar({
           </div>
         </div>
 
-        <CombattiButton
-          filled={actionQueue.length}
-          max={maxSlots}
-          ready={canConfirm}
-          glow={slotsFull}
-          onConfirm={onConfirm}
-        />
+        <div
+          className={cn(
+            "action-slot-meter",
+            slotsFull && "action-slot-meter--ready"
+          )}
+          aria-label={`Slot ${actionQueue.length}/${maxSlots}`}
+        >
+          <span className="action-slot-meter__count">
+            {actionQueue.length}/{maxSlots}
+          </span>
+          <span className="action-slot-meter__hint">
+            {slotsFull ? "Via!" : "Riempi"}
+          </span>
+        </div>
 
         {hasSub && (
           <div
@@ -76,31 +81,6 @@ export default function ActionSlotsBar({
         )}
       </div>
     </div>
-  );
-}
-
-function CombattiButton({ filled, max, ready, glow, onConfirm }) {
-  return (
-    <button
-      type="button"
-      disabled={!ready}
-      onClick={() => ready && onConfirm?.()}
-      className={cn(
-        "combatti-anchor",
-        ready && "combatti-anchor--armed",
-        glow && "combatti-anchor--ready",
-        !ready && "combatti-anchor--idle"
-      )}
-      aria-label="Combatti"
-    >
-      <span className="combatti-anchor__ring" aria-hidden="true" />
-      <span className="combatti-anchor__glow" aria-hidden="true" />
-      <Anchor size={22} strokeWidth={2.5} className="combatti-anchor__icon" />
-      <span className="combatti-anchor__count">
-        {filled}/{max}
-      </span>
-      <span className="combatti-anchor__label">Combatti!</span>
-    </button>
   );
 }
 
@@ -178,9 +158,9 @@ export function ActionSlotsLegend() {
     >
       <span className="text-white/55">Tocca = gioca</span>
       <span className="text-[#f5a623]">·</span>
-      <span className="text-white/80">Vicine = fusione</span>
+      <span className="text-white/80">3 carte = combatti</span>
       <span className="text-[#f5a623]">·</span>
-      <span className={`rounded px-1 text-black ${AMBER}`}>Ancora</span>
+      <span className={`rounded px-1 text-black ${AMBER}`}>Auto</span>
     </div>
   );
 }

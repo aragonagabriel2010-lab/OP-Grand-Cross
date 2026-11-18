@@ -28,6 +28,7 @@ import {
   refillHand,
   removeCharacterCards,
   maxHandSize,
+  drawCountForTeam,
   resolveAdjacentMerges,
   starLabel,
 } from "@/lib/battleHand";
@@ -150,6 +151,7 @@ export default function Battle() {
   const floaterId = useRef(0);
   const ultRef = useRef([]);
   const staminaLockRef = useRef(false);
+  const autoFightLockRef = useRef(false);
   const benchRef = useRef(null);
   const openingMembersRef = useRef([]);
   const openingBenchRef = useRef(null);
@@ -235,7 +237,8 @@ export default function Battle() {
     setTimeout(() => setSubBanner(null), 1400);
     setHand((prev) => {
       const cleaned = removeCharacterCards(prev, ci);
-      const result = refillHand(cleaned.hand, aliveMembers(), 2);
+      const alive = aliveMembers();
+      const result = refillHand(cleaned.hand, alive, drawCountForTeam(alive));
       flashMerges([...(cleaned.merges || []), ...(result.merges || [])]);
       setActionQueue((q) =>
         pruneStalePlays(prunePlaysForCharacter(q, ci), destroyedIdsFromMerges(result.merges))
@@ -275,6 +278,7 @@ export default function Battle() {
 
   function resetTurnActions() {
     if (busy || phase !== "player" || !turnHandSnapshot) return;
+    autoFightLockRef.current = false;
     setHand(cloneHand(turnHandSnapshot));
     setActionQueue([]);
     pushLog("Mosse annullate — mano ripristinata");
@@ -739,7 +743,7 @@ export default function Battle() {
         remaining.push(createBattleTile(ci, 3, 3));
       }
     }
-    commitHand(refillHand(remaining, alive, 2));
+    commitHand(refillHand(remaining, alive, drawCountForTeam(alive)));
 
     // Scala buff cibo a durata turni
     tickFoodBuffAfterPlayerTurn();
@@ -765,8 +769,26 @@ export default function Battle() {
 
     setTurn((t) => t + 1);
     beginPlayerPlanning(null);
+    autoFightLockRef.current = false;
     setBusy(false);
   }
+
+  /** Slot pieni (di solito 3 carte) → combatti automaticamente */
+  useEffect(() => {
+    if (busy || phase !== "player") return;
+    const maxSlots = aliveMembers().length;
+    if (maxSlots <= 0 || actionQueue.length < maxSlots) {
+      if (actionQueue.length < maxSlots) autoFightLockRef.current = false;
+      return undefined;
+    }
+    if (autoFightLockRef.current) return undefined;
+    autoFightLockRef.current = true;
+    const t = window.setTimeout(() => {
+      void doAttack();
+    }, 200);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionQueue, busy, phase, memberHp, teamMembers]);
 
   function tickFoodBuffAfterPlayerTurn() {
     if (practiceMode) return;
@@ -1234,7 +1256,7 @@ export default function Battle() {
                 </div>
               </div>
 
-              {/* Pedane 1/2/3 + COMBATTI + SUB */}
+              {/* Pedane 1/2/3 + SUB — combatti auto a slot pieni */}
               {planning && (
                 <div className="relative z-[8] flex w-full shrink-0 justify-center overflow-visible pb-1 pt-1">
                   <Droppable droppableId="action-slots" direction="horizontal" isDropDisabled={busy || actionQueue.length >= maxSlots}>
@@ -1248,9 +1270,7 @@ export default function Battle() {
                           bench={bench}
                           dropProvided={provided}
                           isDraggingOver={snapshot.isDraggingOver}
-                          canConfirm={actionQueue.length > 0 && !busy}
                           slotsFull={slotsFull}
-                          onConfirm={() => void doAttack()}
                         />
                       );
                     }}

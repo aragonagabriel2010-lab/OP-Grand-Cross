@@ -40,7 +40,7 @@ const STEPS = [
   {
     icon: Swords,
     title: "Esegui il turno",
-    body: "Con almeno una carta negli slot, tocca la barra slot per attaccare. Se li riempi tutti, parte da solo.",
+    body: "Riempi gli slot azione (di solito 3 carte): il combattimento parte da solo, senza tasto Combatti.",
   },
 ];
 

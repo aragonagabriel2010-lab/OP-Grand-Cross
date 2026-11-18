@@ -43,12 +43,15 @@ function rewardLines(reward) {
   return lines;
 }
 
-/** Un battito della carica ricompensa (ms) */
-const REWARD_BEAT_MS = 700;
-const REWARD_BEATS = 3;
+/** Timing ricompensa — totale ~2s */
+const REWARD_TOTAL_MS = 2000;
+const REWARD_CHARGE_MS = 500;
+const REWARD_FLASH_MS = 220;
+const REWARD_BEAT_MS = 250;
+const REWARD_BEATS = 2;
 
 /**
- * Pop-up ricompensa: 3 battiti → TIN! → premio → chiusura automatica.
+ * Pop-up ricompensa: carica breve → TIN! → premio → chiusura in 2s.
  */
 function RewardReveal({ open, title, reward, onContinue }) {
   const [phase, setPhase] = useState("charge"); // charge → flash → reveal
@@ -59,7 +62,6 @@ function RewardReveal({ open, title, reward, onContinue }) {
   useEffect(() => {
     if (!open) return undefined;
     setPhase("charge");
-    const chargeMs = REWARD_BEAT_MS * REWARD_BEATS;
     const tFlash = window.setTimeout(() => {
       setPhase("flash");
       try {
@@ -67,9 +69,12 @@ function RewardReveal({ open, title, reward, onContinue }) {
       } catch {
         /* ignore */
       }
-    }, chargeMs);
-    const tReveal = window.setTimeout(() => setPhase("reveal"), chargeMs + 450);
-    const tDone = window.setTimeout(() => onContinueRef.current?.(), chargeMs + 450 + 1600);
+    }, REWARD_CHARGE_MS);
+    const tReveal = window.setTimeout(
+      () => setPhase("reveal"),
+      REWARD_CHARGE_MS + REWARD_FLASH_MS
+    );
+    const tDone = window.setTimeout(() => onContinueRef.current?.(), REWARD_TOTAL_MS);
     return () => {
       window.clearTimeout(tFlash);
       window.clearTimeout(tReveal);

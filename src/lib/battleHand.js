@@ -28,6 +28,12 @@ export function maxHandSize(teamSize) {
   return 5;
 }
 
+/** Carte pescate a fine turno: 2 per personaggio vivo */
+export function drawCountForTeam(aliveCharIndexes) {
+  const n = (aliveCharIndexes || []).filter((i) => i != null).length;
+  return Math.max(2, n * 2);
+}
+
 /** Pool: solo abilità normali [0,1,2] per ogni PG vivo */
 export function buildSkillPool(aliveCharIndexes) {
   return aliveCharIndexes.flatMap((ci) =>
@@ -59,19 +65,28 @@ export function resolveCardStats(character, owned, card) {
 }
 
 /**
- * Fase 1: 2 carte garantite per PG
- * Fase 2: riempi fino a maxHandSize dal pool globale
- * Poi auto-merge adiacenze
+ * Apertura partita: più spesso ogni PG riceve una carta per ciascuna abilità (0/1/2).
+ * Altrimenti 2 carte casuali per PG, poi riempimento random fino a maxHandSize.
  */
 export function dealOpeningHand(aliveCharIndexes) {
   const alive = aliveCharIndexes.filter((i) => i != null);
   const max = maxHandSize(alive.length);
   const hand = [];
+  const preferFullKit = Math.random() < 0.78;
 
-  for (const ci of alive) {
-    const personal = shuffle([0, 1, 2]);
-    hand.push(createBattleTile(ci, personal[0], 1));
-    hand.push(createBattleTile(ci, personal[1], 1));
+  if (preferFullKit) {
+    for (const ci of alive) {
+      for (const moveIndex of shuffle([0, 1, 2])) {
+        if (hand.length >= max) break;
+        hand.push(createBattleTile(ci, moveIndex, 1));
+      }
+    }
+  } else {
+    for (const ci of alive) {
+      const personal = shuffle([0, 1, 2]);
+      hand.push(createBattleTile(ci, personal[0], 1));
+      hand.push(createBattleTile(ci, personal[1], 1));
+    }
   }
 
   const pool = buildSkillPool(alive);
@@ -80,17 +95,18 @@ export function dealOpeningHand(aliveCharIndexes) {
     hand.push(createBattleTile(pick.charIndex, pick.moveIndex, 1));
   }
 
-  return resolveAdjacentMerges(hand);
+  return resolveAdjacentMerges(shuffle([...hand]));
 }
 
 /**
- * Pescata a fine turno — solo riempimento, senza rifare fase 1
+ * Pescata a fine turno — default: 2 carte × personaggio vivo.
  */
-export function refillHand(hand, aliveCharIndexes, drawCount = 2) {
+export function refillHand(hand, aliveCharIndexes, drawCount) {
   const alive = aliveCharIndexes.filter((i) => i != null);
   const max = maxHandSize(alive.length);
   const room = Math.max(0, max - hand.length);
-  const n = Math.min(drawCount, room);
+  const want = drawCount == null ? drawCountForTeam(alive) : drawCount;
+  const n = Math.min(want, room);
   if (n <= 0) return resolveAdjacentMerges(hand);
 
   const pool = buildSkillPool(alive);
@@ -136,7 +152,7 @@ export function resolveAdjacentMerges(hand) {
 }
 
 /** Rimuove carte usate per id, poi refill + merge */
-export function afterCardsPlayed(hand, usedIds, aliveCharIndexes, drawCount = 2) {
+export function afterCardsPlayed(hand, usedIds, aliveCharIndexes, drawCount) {
   const idSet = new Set(usedIds);
   const remaining = hand.filter((c) => !idSet.has(c.id));
   return refillHand(remaining, aliveCharIndexes, drawCount);
