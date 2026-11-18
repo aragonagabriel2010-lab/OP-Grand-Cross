@@ -81,7 +81,7 @@ export const CHARACTERS = [
     hp: 140,
     attack: 36,
     color: "#A16207",
-    image_url: "",
+    image_url: "/bounty/usopp-syrup-village.jpg",
     moves: [
       atk("Hissatsu Usopp Hammer", 22, "Martellata"),
       atk("Kayaku Boshi", 28, "Proiettile esplosivo"),
@@ -204,7 +204,7 @@ export const CHARACTERS = [
     defense: 22,
     resistances: { Forza: 0.08 },
     color: "#F472B6",
-    image_url: "/bounty/coby-wanted.svg?v=2",
+    image_url: "/bounty/koby-alvida-arc.jpg",
     moves: [
       atk("Determination Punch", 20, "Pugno deciso"),
       buff("Dream of Marine", 16, "Sogno di giustizia"),
@@ -288,7 +288,7 @@ export const CHARACTERS = [
     defense: 48,
     resistances: { Velocità: 0.12, Tecnica: 0.05 },
     color: "#7C3AED",
-    image_url: "/bounty/alvida-boss.svg?v=2",
+    image_url: "/bounty/alvida-bounty.jpg",
     moves: [
       atk("Iron Mace", 24),
       atk("Beauty Crush", 20),
@@ -308,7 +308,7 @@ export const CHARACTERS = [
     attack: 16,
     defense: 12,
     color: "#6B7280",
-    image_url: "/bounty/alvida-crew.svg?v=2",
+    image_url: "",
     moves: [atk("Colpo di Sciabola", 14), atk("Carica", 12)],
   },
   {
