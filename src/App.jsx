@@ -4,6 +4,7 @@ import { queryClientInstance } from "@/lib/query-client";
 import { BrowserRouter as Router, Route, Routes, Navigate, useParams } from "react-router-dom";
 import PageNotFound from "./lib/PageNotFound";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
+import { GameProvider } from "@/hooks/useGame";
 import ScrollToTop from "./components/ScrollToTop";
 import Home from "@/pages/Home";
 import Fight from "@/pages/Fight";
@@ -167,14 +168,16 @@ const AuthenticatedApp = () => {
 function App() {
   return (
     <AuthProvider>
-      <QueryClientProvider client={queryClientInstance}>
-        <Router basename={import.meta.env.BASE_URL}>
-          <ScrollToTop />
-          <UiSfxBridge />
-          <AuthenticatedApp />
-        </Router>
-        <Toaster />
-      </QueryClientProvider>
+      <GameProvider>
+        <QueryClientProvider client={queryClientInstance}>
+          <Router basename={import.meta.env.BASE_URL}>
+            <ScrollToTop />
+            <UiSfxBridge />
+            <AuthenticatedApp />
+          </Router>
+          <Toaster />
+        </QueryClientProvider>
+      </GameProvider>
     </AuthProvider>
   );
 }

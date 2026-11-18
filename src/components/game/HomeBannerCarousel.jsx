@@ -16,7 +16,7 @@ const BANNERS = [
     subtitle: "Nuovo banner · SR+ in ×10",
     cta: "Recluta",
     to: "/gacha",
-    image: "banners/rotta-grand-line/banner.jpg",
+    image: "banners/rotta-grand-line/banner1.jpg",
     textRight: true,
     gradient: "from-transparent via-[#0b161b]/10 to-[#0b161b]/65",
     accent: "#f5a623",

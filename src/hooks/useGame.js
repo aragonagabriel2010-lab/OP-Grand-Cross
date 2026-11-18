@@ -1,25 +1,46 @@
-import { useState, useEffect, useCallback } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { db, whenSaveReady } from "@/lib/localDb";
 import { useAuth } from "@/lib/AuthContext";
 import { computeStamina, STAMINA_MAX_DEFAULT } from "@/lib/stamina";
 import { normalizeUltimateFields, ULTIMATE_MIN_LEVEL, consolidateDuplicateOwned } from "@/lib/ultimate";
 import { defaultIngredients, defaultItems, defaultUsables } from "@/lib/inventory";
 
-export function useGame() {
+const GameContext = createContext({ loading: true });
+
+export function GameProvider({ children }) {
   const { user, isLoadingAuth, saveReady } = useAuth();
   const [data, setData] = useState({ loading: true });
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
+  /** Aggiorna subito le valute in UI senza aspettare il reload completo. */
+  const patchPlayerState = useCallback((patch) => {
+    setData((prev) => {
+      if (!prev?.playerState) return prev;
+      return {
+        ...prev,
+        playerState: { ...prev.playerState, ...patch },
+      };
+    });
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (isLoadingAuth || !saveReady) {
-        setData((d) => ({ ...d, loading: true }));
+        setData((d) => ({ ...d, loading: true, refresh, patchPlayerState }));
         return;
       }
       if (!user?.uid) {
-        setData({ loading: false, error: new Error("Non autenticato"), refresh });
+        setData({ loading: false, error: new Error("Non autenticato"), refresh, patchPlayerState });
         return;
       }
       try {
@@ -127,15 +148,25 @@ export function useGame() {
           playerState,
           owned: ownedList.map(normalizeUltimateFields),
           refresh,
+          patchPlayerState,
         });
       } catch (e) {
-        if (!cancelled) setData({ loading: false, error: e, refresh });
+        if (!cancelled) setData({ loading: false, error: e, refresh, patchPlayerState });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [tick, user?.uid, isLoadingAuth, saveReady, refresh]);
+  }, [tick, user?.uid, isLoadingAuth, saveReady, refresh, patchPlayerState]);
 
-  return data;
+  const value = useMemo(
+    () => ({ ...data, refresh, patchPlayerState }),
+    [data, refresh, patchPlayerState]
+  );
+
+  return createElement(GameContext.Provider, { value }, children);
+}
+
+export function useGame() {
+  return useContext(GameContext);
 }

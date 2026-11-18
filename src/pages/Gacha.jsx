@@ -19,7 +19,7 @@ import { AudioManager } from "@/lib/AudioManager";
 import { hasUnlock } from "@/lib/rank";
 
 export default function Gacha() {
-  const { loading, characters, playerState, refresh } = useGame();
+  const { loading, characters, playerState, refresh, patchPlayerState } = useGame();
   const [pulling, setPulling] = useState(false);
   const [results, setResults] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -66,8 +66,10 @@ export default function Gacha() {
     setFlipPhase(true);
     AudioManager.playUlt();
 
+    const nextStrawberry = playerState.strawberry - cost;
+    patchPlayerState?.({ strawberry: nextStrawberry });
     await db.entities.PlayerState.update(playerState.id, {
-      strawberry: playerState.strawberry - cost,
+      strawberry: nextStrawberry,
     });
 
     let pityState = loadPity(uid);

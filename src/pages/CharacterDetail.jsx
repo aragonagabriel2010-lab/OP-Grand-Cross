@@ -87,7 +87,7 @@ const ACTIONS = [
 export default function CharacterDetail() {
   const { ownedId, characterId } = useParams();
   const navigate = useNavigate();
-  const { loading, charMap, owned, playerState, refresh } = useGame();
+  const { loading, charMap, owned, playerState, refresh, patchPlayerState } = useGame();
 
   const [burst, setBurst] = useState(null);
   const [avatarPulse, setAvatarPulse] = useState(false);
@@ -191,7 +191,9 @@ export default function CharacterDetail() {
     if (isLocked || !canLevel) return;
     setBusy(true);
     const nextLevel = ownedNorm.level + 1;
-    await db.entities.PlayerState.update(playerState.id, { berry: playerState.berry - lvlCost });
+    const nextBerry = playerState.berry - lvlCost;
+    patchPlayerState?.({ berry: nextBerry });
+    await db.entities.PlayerState.update(playerState.id, { berry: nextBerry });
     await db.entities.OwnedCharacter.update(ownedNorm.id, { level: nextLevel, exp: 0 });
     try {
       const { bumpDaily } = await import("@/lib/dailies");
@@ -214,8 +216,13 @@ export default function CharacterDetail() {
     setBusy(true);
     const nextAsc = ownedNorm.ascension + 1;
     const spent = spendAwakeningMaterials(playerState.materials, ownedNorm.ascension);
+    const nextStrawberry = playerState.strawberry - spent.strawberryCost;
+    patchPlayerState?.({
+      strawberry: nextStrawberry,
+      materials: spent.materials,
+    });
     await db.entities.PlayerState.update(playerState.id, {
-      strawberry: playerState.strawberry - spent.strawberryCost,
+      strawberry: nextStrawberry,
       materials: spent.materials,
     });
     await db.entities.OwnedCharacter.update(ownedNorm.id, { ascension: nextAsc });

@@ -31,7 +31,7 @@ export default function GachaHeroBanner({
 
       <div className="relative aspect-[16/9] min-h-[10rem] w-full overflow-hidden sm:min-h-[11rem]">
         <img
-          src={asset("banners/rotta-grand-line/banner.jpg")}
+          src={asset("banners/rotta-grand-line/banner1.jpg")}
           alt=""
           className="absolute inset-0 h-full w-full object-cover object-center"
           draggable={false}
