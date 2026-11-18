@@ -244,75 +244,112 @@ export default function Gacha() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md"
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md sm:p-4"
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className={`relative w-full max-w-md rounded-2xl ${TEAL} ${PANEL} p-5`}
+              className={`gacha-results relative flex w-full max-w-md flex-col overflow-hidden rounded-2xl ${TEAL} ${PANEL}`}
             >
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className={`absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg ${TEAL} border-2 border-black`}
-              >
-                <X size={16} className="text-[#f5a623]" />
-              </button>
-              <h3 className="mb-4 text-center text-lg uppercase tracking-wide text-[#f5a623]">Hai reclutato!</h3>
-              <div
-                className={
-                  results.length > 1
-                    ? "grid max-h-[60vh] grid-cols-3 gap-x-2 gap-y-4 overflow-y-auto px-1"
-                    : "flex justify-center"
-                }
-              >
-                {results.map((c, i) => {
-                  const attr = ATTRIBUTE_INFO[c.attribute];
-                  return (
-                    <motion.div
-                      key={i}
-                      initial={{ scale: 0, rotateY: 90, opacity: 0 }}
-                      animate={{ scale: 1, rotateY: 0, opacity: 1 }}
-                      transition={{ delay: i * 0.1, type: "spring", stiffness: 260 }}
-                      className={`flex flex-col items-center gap-1 ${results.length > 1 ? "w-full" : "w-28"}`}
-                    >
-                      <div className="relative w-full">
-                        <div
-                          className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border-2 border-black bg-[#0b161b] shadow-[0_3px_0_0_#000]"
-                          style={{ boxShadow: `0 3px 0 0 #000, 0 0 10px ${RARITY_GLOW[c.rarity]}` }}
-                        >
-                          <CharacterArt character={c} className="h-full w-full" />
-                        </div>
-                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 rounded bg-[#0b161b] px-1">
-                          <RarityStars rarity={c.rarity} size={10} />
-                        </div>
-                        <div
-                          className="absolute -bottom-1 -left-1 flex h-5 w-5 items-center justify-center rounded border border-black text-[9px]"
-                          style={{ background: attr?.color }}
-                        >
-                          {attr?.icon}
-                        </div>
-                      </div>
-                      <p className="w-full truncate text-center text-[10px] font-bold uppercase text-white">
-                        {c.char_name}
-                      </p>
-                      <p className="w-full truncate text-center text-[8px] uppercase text-[#f5a623]">{c.version}</p>
-                      {c.isDuplicate && (
-                        <span className="rounded border border-black bg-[#f5a623] px-1 py-0.5 text-[7px] font-bold uppercase text-black">
-                          Doppione · +{c.tokensGained || 1} Gettone Ulti
-                        </span>
-                      )}
-                    </motion.div>
-                  );
-                })}
+              <div className="relative shrink-0 border-b-2 border-black px-4 pb-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg border-2 border-black bg-[#0b161b]"
+                  aria-label="Chiudi"
+                >
+                  <X size={16} className="text-[#f5a623]" />
+                </button>
+                <h3 className="pr-8 text-center text-lg uppercase tracking-wide text-[#f5a623]">
+                  Hai reclutato!
+                </h3>
+                {results.length > 1 && (
+                  <p className="mt-1 text-center text-[10px] uppercase tracking-wide text-white/55">
+                    {results.length} pull · {results.filter((r) => !r.isDuplicate).length} nuovi ·{" "}
+                    {results.filter((r) => r.isDuplicate).length} doppioni
+                  </p>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className={`mt-5 w-full rounded-2xl py-3 text-base uppercase tracking-wide ${AMBER} ${PANEL}`}
-              >
-                Conferma
-              </button>
+
+              <div className="gacha-results__scroll-wrap relative min-h-0 flex-1">
+                <div
+                  className={
+                    results.length > 1
+                      ? "game-scroll gacha-results__grid max-h-[min(58vh,28rem)] overflow-y-auto overscroll-contain px-3 py-4"
+                      : "flex justify-center px-3 py-4"
+                  }
+                >
+                  <div
+                    className={
+                      results.length > 1
+                        ? "grid grid-cols-3 gap-x-2 gap-y-4"
+                        : "flex justify-center"
+                    }
+                  >
+                    {results.map((c, i) => {
+                      const attr = ATTRIBUTE_INFO[c.attribute];
+                      const isNew = !c.isDuplicate;
+                      return (
+                        <motion.div
+                          key={`${c.id || c.char_name}_${i}`}
+                          initial={{ scale: 0, rotateY: 90, opacity: 0 }}
+                          animate={{ scale: 1, rotateY: 0, opacity: 1 }}
+                          transition={{ delay: Math.min(i * 0.07, 0.7), type: "spring", stiffness: 260 }}
+                          className={`gacha-result-card flex flex-col items-center gap-1 ${
+                            results.length > 1 ? "w-full" : "w-28"
+                          } ${isNew ? "gacha-result-card--new" : ""}`}
+                        >
+                          <div className="relative w-full">
+                            <div
+                              className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border-2 border-black bg-[#0b161b]"
+                              style={{
+                                boxShadow: `0 3px 0 0 #000, 0 0 12px ${RARITY_GLOW[c.rarity]}`,
+                              }}
+                            >
+                              <CharacterArt character={c} className="h-full w-full" />
+                              {isNew && (
+                                <span className="gacha-result-card__new-tag">Nuovo</span>
+                              )}
+                            </div>
+                            <div className="absolute -top-1 left-1/2 -translate-x-1/2 rounded bg-[#0b161b] px-1">
+                              <RarityStars rarity={c.rarity} size={10} />
+                            </div>
+                            <div
+                              className="absolute -bottom-1 -left-1 flex h-5 w-5 items-center justify-center rounded border border-black text-[9px]"
+                              style={{ background: attr?.color }}
+                            >
+                              {attr?.icon}
+                            </div>
+                          </div>
+                          <p className="w-full truncate text-center text-[10px] font-bold uppercase text-white">
+                            {c.char_name}
+                          </p>
+                          <p className="w-full truncate text-center text-[8px] uppercase text-[#f5a623]">
+                            {c.version}
+                          </p>
+                          {c.isDuplicate ? (
+                            <span className="gacha-result-card__dup">
+                              Doppione · +{c.tokensGained || 1} Ulti
+                            </span>
+                          ) : (
+                            <span className="gacha-result-card__fresh">In ciurma</span>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="shrink-0 border-t-2 border-black p-4">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className={`w-full rounded-2xl py-3 text-base uppercase tracking-wide ${AMBER} ${PANEL}`}
+                >
+                  Conferma
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

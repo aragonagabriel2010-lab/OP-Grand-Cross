@@ -2134,6 +2134,73 @@
   background: #0b161b;
 }
 
+/* ===== Gacha results modal ===== */
+.gacha-results {
+  max-height: min(88vh, 40rem);
+}
+
+.gacha-results__scroll-wrap {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+}
+
+.gacha-results__grid {
+  padding-right: 0.35rem;
+}
+
+.gacha-result-card__new-tag {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  z-index: 2;
+  border: 1.5px solid #000;
+  border-radius: 0.35rem;
+  background: #f5a623;
+  padding: 0.1rem 0.28rem;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #0b161b;
+  box-shadow: 0 2px 0 0 #000;
+}
+
+.gacha-result-card__dup {
+  max-width: 100%;
+  border: 1.5px solid #000;
+  border-radius: 0.4rem;
+  background: rgba(245, 166, 35, 0.2);
+  padding: 0.15rem 0.35rem;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f5a623;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.gacha-result-card__fresh {
+  border: 1.5px solid #000;
+  border-radius: 0.4rem;
+  background: rgba(56, 189, 248, 0.18);
+  padding: 0.15rem 0.35rem;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #38bdf8;
+}
+
+.gacha-result-card--new .gacha-result-card__fresh {
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
 /* ===== Scheda personaggio — composizione unica ===== */
 .char-sheet {
   background: #0a1214;
