@@ -44,7 +44,7 @@ function MissionCard({
     <motion.div
       initial={{ opacity: 0, x: -16 }}
       animate={{ opacity: 1, x: 0 }}
-      className={`group relative flex w-full flex-col gap-2 rounded-2xl border-2 border-black p-3 shadow-[0_4px_0_0_#000] ${
+      className={`group relative z-10 flex w-full flex-col gap-2 rounded-2xl border-2 border-black p-3 shadow-[0_4px_0_0_#000] ${
         unlocked ? TEAL : "bg-[#0d2a2c] text-white/50 opacity-70"
       }`}
     >
@@ -52,7 +52,7 @@ function MissionCard({
         type="button"
         disabled={!unlocked}
         onClick={() => unlocked && enterBattle(ch, false)}
-        className={`flex w-full items-center gap-3 text-left ${unlocked && !affordable ? "opacity-80" : ""}`}
+        className={`relative z-10 flex w-full items-center gap-3 text-left ${unlocked && !affordable ? "opacity-80" : ""}`}
       >
         <div className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-black bg-[#0b161b]">
           {completed ? (
@@ -240,8 +240,11 @@ export default function StoryArc() {
         </div>
 
         <div className="relative mb-8">
-          <div className="absolute left-[27px] top-2 bottom-2 w-1 -translate-x-1/2 rounded-full bg-[#f5a623]/30" />
-          <div className="space-y-3">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-[27px] top-2 bottom-2 z-0 w-1 -translate-x-1/2 rounded-full bg-[#f5a623]/30"
+          />
+          <div className="relative z-10 space-y-3">
             {missions.map((ch) => {
               const unlocked = ch.chapter_number <= progress;
               const completed = ch.chapter_number < progress;

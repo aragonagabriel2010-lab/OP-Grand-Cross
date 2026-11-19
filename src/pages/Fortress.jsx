@@ -57,7 +57,7 @@ function LevelCard({
       initial={{ opacity: 0, x: -16 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: (level - 1) * 0.03 }}
-      className={`group relative flex w-full flex-col gap-2 rounded-2xl border-2 border-black p-3 shadow-[0_4px_0_0_#000] ${
+      className={`group relative z-10 flex w-full flex-col gap-2 rounded-2xl border-2 border-black p-3 shadow-[0_4px_0_0_#000] ${
         unlocked ? TEAL : "bg-[#0d2a2c] text-white/50 opacity-70"
       }`}
     >
@@ -65,7 +65,7 @@ function LevelCard({
         type="button"
         disabled={!unlocked}
         onClick={() => unlocked && onPlay()}
-        className={`flex w-full items-center gap-3 text-left ${unlocked && !affordable ? "opacity-80" : ""}`}
+        className={`relative z-10 flex w-full items-center gap-3 text-left ${unlocked && !affordable ? "opacity-80" : ""}`}
       >
         <div className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-black bg-[#0b161b]">
           {completed ? (
@@ -297,10 +297,11 @@ export default function Fortress() {
 
             <div className="relative mb-6">
               <div
-                className="absolute left-[27px] top-2 bottom-2 w-1 -translate-x-1/2 rounded-full opacity-30"
+                aria-hidden
+                className="pointer-events-none absolute left-[27px] top-2 bottom-2 z-0 w-1 -translate-x-1/2 rounded-full opacity-30"
                 style={{ background: zone.accent }}
               />
-              <div className="space-y-3">
+              <div className="relative z-10 space-y-3">
                 {Array.from({ length: FORTRESS_LEVELS }, (_, i) => {
                   const level = i + 1;
                   const unlocked = canPlayFortressLevel(progress, zone.id, level);

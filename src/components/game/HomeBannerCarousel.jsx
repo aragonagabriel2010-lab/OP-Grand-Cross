@@ -156,29 +156,35 @@ export default function HomeBannerCarousel({ onOpenMissions, className }) {
           </motion.button>
         </AnimatePresence>
 
-        {/* frecce sottili */}
-        <button
-          type="button"
-          aria-label="Annuncio precedente"
-          onClick={(e) => {
-            e.stopPropagation();
-            go(-1);
-          }}
-          className="absolute left-1.5 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border-2 border-black bg-black/55 text-sm font-black text-[#f5a623]"
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          aria-label="Annuncio successivo"
-          onClick={(e) => {
-            e.stopPropagation();
-            go(1);
-          }}
-          className="absolute right-1.5 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border-2 border-black bg-black/55 text-sm font-black text-[#f5a623]"
-        >
-          ›
-        </button>
+        {/* Wrapper tiene il centro; data-no-lift evita che l'hover arcade sovrascriva -translate-y-1/2 */}
+        <div className="pointer-events-none absolute inset-y-0 left-1.5 z-20 flex items-center">
+          <button
+            type="button"
+            data-no-lift
+            aria-label="Annuncio precedente"
+            onClick={(e) => {
+              e.stopPropagation();
+              go(-1);
+            }}
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border-2 border-black bg-black/55 text-sm font-black text-[#f5a623]"
+          >
+            ‹
+          </button>
+        </div>
+        <div className="pointer-events-none absolute inset-y-0 right-1.5 z-20 flex items-center">
+          <button
+            type="button"
+            data-no-lift
+            aria-label="Annuncio successivo"
+            onClick={(e) => {
+              e.stopPropagation();
+              go(1);
+            }}
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border-2 border-black bg-black/55 text-sm font-black text-[#f5a623]"
+          >
+            ›
+          </button>
+        </div>
       </div>
 
       <div className="mt-2 flex items-center justify-center gap-1.5">
