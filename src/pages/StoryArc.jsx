@@ -128,15 +128,24 @@ export default function StoryArc() {
   const arc = STORY_ARC_MAP[arcId];
   const { loading, playerState, refresh } = useGame();
   const [chapters, setChapters] = useState([]);
+  const [chaptersReady, setChaptersReady] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [alertModal, setAlertModal] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const list = await db.entities.StoryChapter.list("chapter_number", 120);
-      setChapters(list);
+      try {
+        const list = await db.entities.StoryChapter.list("chapter_number", 120);
+        if (!cancelled) setChapters(list || []);
+      } finally {
+        if (!cancelled) setChaptersReady(true);
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -161,7 +170,8 @@ export default function StoryArc() {
 
   if (!arc) return <Navigate to="/fight/story" replace />;
 
-  if (loading || !playerState || !live) {
+  // Non redirectare finché i capitoli non sono caricati: con [] isArcUnlocked è sempre false
+  if (loading || !playerState || !live || !chaptersReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0b161b]">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#164446] border-t-[#f5a623]" />
@@ -169,7 +179,7 @@ export default function StoryArc() {
     );
   }
 
-  const progress = playerState.story_progress;
+  const progress = playerState.story_progress || 1;
   const sideCleared = playerState.side_cleared || [];
   const missions = mainChaptersForArc(chapters, arc.id);
   const sides = sideChaptersForArc(chapters, arc.id);
