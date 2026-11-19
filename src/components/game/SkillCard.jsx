@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ATTRIBUTE_INFO, STAR_RANKS } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
 import { CharacterArt } from "@/components/game/CharacterCard";
 import { Swords, Heart, Shield, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -92,6 +93,8 @@ export default function SkillCard({
   advantage = 1,
   onClick,
   merging = false,
+  /** 'left' | 'right' | 'result' — animazione unione */
+  mergeRole = null,
   className,
 }) {
   const [tip, setTip] = useState(false);
@@ -101,6 +104,15 @@ export default function SkillCard({
   const { Icon, label, color, key: typeKey } = typeMeta;
   const effectText = move?.description || move?.effect || null;
   const rankKey = stars >= 3 ? "gold" : stars === 2 ? "silver" : "bronze";
+
+  const mergeAnimate =
+    mergeRole === "left"
+      ? { x: [0, 36], scale: [1, 0.82], opacity: [1, 0.15], rotate: [0, 8] }
+      : mergeRole === "right"
+        ? { x: [0, -36], scale: [1, 0.82], opacity: [1, 0.15], rotate: [0, -8] }
+        : mergeRole === "result" || merging
+          ? { scale: [0.72, 1.14, 1], opacity: [0.35, 1, 1], y: [8, -4, 0] }
+          : undefined;
 
   return (
     <motion.div
@@ -118,14 +130,21 @@ export default function SkillCard({
       onMouseLeave={() => setTip(false)}
       onFocus={() => setTip(true)}
       onBlur={() => setTip(false)}
-      animate={merging ? { scale: [1, 1.08, 1] } : undefined}
-      transition={{ duration: 0.45 }}
+      animate={mergeAnimate}
+      transition={
+        mergeRole === "left" || mergeRole === "right"
+          ? { duration: 0.45, ease: [0.22, 1, 0.36, 1] }
+          : { duration: 0.5, ease: [0.34, 1.4, 0.64, 1] }
+      }
       className={cn(
         "skill-card-7ds",
         `skill-card-7ds--${rankKey}`,
         `skill-card-7ds--type-${typeKey}`,
         selected && "skill-card-7ds--selected",
         merging && "skill-card-7ds--merging",
+        mergeRole === "left" && "skill-card-7ds--merge-left",
+        mergeRole === "right" && "skill-card-7ds--merge-right",
+        mergeRole === "result" && "skill-card-7ds--merge-result",
         className
       )}
       style={{
@@ -199,7 +218,10 @@ export default function SkillCard({
             className="flex h-5 w-5 items-center justify-center rounded border border-black text-[10px]"
             style={{ background: attr.color }}
           >
-            {attr.icon}
+            <AttributeIcon
+              attribute={member?.character?.attribute}
+              className="attr-glyph h-3 w-3 text-white"
+            />
           </span>
           <span className="text-[8px] uppercase text-white/70">
             {attr.label || member?.character?.attribute}

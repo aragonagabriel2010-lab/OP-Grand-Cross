@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "@/lib/localDb";
@@ -18,6 +18,7 @@ import {
   RARITY_GLOW,
   RARITY_COLORS,
 } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
 import {
   awakeningCost,
   canAffordAwakening,
@@ -43,13 +44,24 @@ import {
   Star,
   Hexagon,
   Shield,
-  Users,
   Check,
   Lock,
   Shirt,
   ArrowRight,
+  ChevronDown,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { clanInfo } from "@/lib/clans";
+import { normalizeUnique, uniqueTypeInfo } from "@/lib/uniques";
+import { AudioManager } from "@/lib/AudioManager";
+import {
+  aggregateEquipmentBonuses,
+  applyEquipmentToStats,
+  normalizeGearList,
+} from "@/lib/equipment";
+import RarityStars from "@/components/game/RarityStars";
+import CharacterEquipMode from "@/components/game/CharacterEquipMode";
 
 function combatClass(atk, def, hp) {
   return atk * 2 + def + Math.floor(hp / 10);
@@ -68,20 +80,11 @@ function MoveIcon({ type, className }) {
   return <Swords size={16} className={cn(color, className)} />;
 }
 
-const EQUIP_SLOTS = [
-  { id: "necklace", label: "Collana" },
-  { id: "bracelet", label: "Bracciale" },
-  { id: "ring1", label: "Anello 1" },
-  { id: "ring2", label: "Anello 2" },
-  { id: "belt", label: "Cintura" },
-  { id: "essence", label: "Essenza", rare: true },
-];
-
 const ACTIONS = [
-  { id: "level", label: "LvL UP", Icon: ArrowUp },
+  { id: "unique", label: "Unica", Icon: Hexagon },
   { id: "awaken", label: "Risveglia", Icon: Sparkles },
-  { id: "ult", label: "ULT", Icon: Zap },
   { id: "equip", label: "Equip", Icon: Shirt },
+  { id: "skills", label: "Abilità", Icon: BookOpen },
 ];
 
 export default function CharacterDetail() {
@@ -96,6 +99,65 @@ export default function CharacterDetail() {
   const [ultiPhase, setUltiPhase] = useState("view");
   const [ultiReveal, setUltiReveal] = useState(null);
   const [actionPanel, setActionPanel] = useState(null);
+  const [uniqueOpen, setUniqueOpen] = useState(false);
+  const [statsExpanded, setStatsExpanded] = useState(false);
+  const [traitsOpen, setTraitsOpen] = useState(false);
+  const [imageZoomed, setImageZoomed] = useState(false);
+  const [equipMode, setEquipMode] = useState(false);
+  const [equipLeaving, setEquipLeaving] = useState(false);
+  const mainRef = useRef(null);
+  const statsPanelRef = useRef(null);
+  const statsCanCollapseRef = useRef(false);
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || !statsExpanded) {
+      statsCanCollapseRef.current = false;
+      return undefined;
+    }
+
+    statsCanCollapseRef.current = false;
+
+    // Aspetta l'animazione di apertura, poi scendi: così non chiude subito a scrollTop 0
+    const openTimer = window.setTimeout(() => {
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      const target = Math.min(200, Math.max(72, maxScroll));
+      if (maxScroll > 0) {
+        el.scrollTo({ top: target, behavior: "smooth" });
+      } else {
+        statsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+      window.setTimeout(() => {
+        // Arma la chiusura solo se siamo davvero scesi (evita chiusura istantanea a top)
+        if (el.scrollTop > 24) statsCanCollapseRef.current = true;
+      }, 420);
+    }, 300);
+
+    const onScroll = () => {
+      if (el.scrollTop > 40) statsCanCollapseRef.current = true;
+      if (statsCanCollapseRef.current && el.scrollTop <= 8) {
+        statsCanCollapseRef.current = false;
+        setStatsExpanded(false);
+        el.scrollTop = 0;
+      }
+    };
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.clearTimeout(openTimer);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [statsExpanded]);
+
+  function openStatsPanel() {
+    setStatsExpanded(true);
+  }
+
+  function closeStatsPanel() {
+    statsCanCollapseRef.current = false;
+    setStatsExpanded(false);
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }
 
   const isLocked = Boolean(characterId);
   const ownedRec = !isLocked && ownedId ? owned?.find((o) => o.id === ownedId) : null;
@@ -166,11 +228,19 @@ export default function CharacterDetail() {
     );
   }
 
-  const hp = effectiveHp(character, ownedNorm) || 0;
-  const atk = effectiveAttack(character, ownedNorm) || 0;
-  const def = effectiveDefense(character, ownedNorm) || 0;
+  const baseHp = effectiveHp(character, ownedNorm) || 0;
+  const baseAtk = effectiveAttack(character, ownedNorm) || 0;
+  const baseDef = effectiveDefense(character, ownedNorm) || 0;
+  const gearBonuses = aggregateEquipmentBonuses(
+    normalizeGearList(playerState.gear),
+    isLocked ? null : ownedNorm.id
+  );
+  const withGear = applyEquipmentToStats(baseHp, baseAtk, baseDef, gearBonuses);
+  const hp = withGear.hp;
+  const atk = withGear.atk;
+  const def = withGear.def;
   const cc = combatClass(atk, def, hp);
-  const attr = ATTRIBUTE_INFO[character.attribute] || { label: "—", icon: "?", color: "#164446" };
+  const attr = ATTRIBUTE_INFO[character.attribute] || { label: "—", color: "#164446" };
   const lvlCost = upgradeCost(ownedNorm.level);
   const wakeCost = awakeningCost(ownedNorm.ascension);
   const canLevel = !isLocked && playerState.berry >= lvlCost && ownedNorm.level < 60 && !busy;
@@ -203,6 +273,7 @@ export default function CharacterDetail() {
       /* ignore */
     }
     setAvatarPulse(true);
+    AudioManager.playLevelUp();
     setBurst({ mode: "level", level: nextLevel, ascension: ownedNorm.ascension });
     refresh();
     setTimeout(() => {
@@ -233,6 +304,7 @@ export default function CharacterDetail() {
       /* ignore */
     }
     setAvatarPulse(true);
+    AudioManager.playAwaken();
     setBurst({ mode: "ascend", level: ownedNorm.level, ascension: nextAsc });
     refresh();
     setTimeout(() => {
@@ -245,6 +317,7 @@ export default function CharacterDetail() {
     if (isLocked || !canUpgradeUlti || !ulti.next) return;
     setBusy(true);
     setUltiPhase("animating");
+    AudioManager.playUltUpgrade();
     const fromDmg = ulti.current.damage;
     const toDmg = ulti.next.damage;
     const toPower = ulti.next.power;
@@ -287,14 +360,371 @@ export default function CharacterDetail() {
     setUltiReveal(null);
   }
 
+  const unique = character ? normalizeUnique(character.unique, character) : null;
+  const uType = unique ? uniqueTypeInfo(unique.type) : null;
+  const clan = character ? clanInfo(character.clan) : null;
+  const critRate = Math.round(((character?.crit_rate ?? 0.05) * 100 + (withGear.critBonus || 0)) * 10) / 10;
+  const critResist = Math.round((character?.crit_resist ?? 0.05) * 100);
+  const lifestealPct = withGear.lifesteal || 0;
+  const regenRoundPct = withGear.regenRound || 0;
+  const longevityPct = withGear.longevity || 0;
+
   function openAction(id) {
-    if (isLocked) return;
+    if (id === "unique") {
+      if (unique) setUniqueOpen(true);
+      return;
+    }
+    if (id === "equip") {
+      if (!isLocked) {
+        setStatsExpanded(false);
+        setEquipMode(true);
+      }
+      return;
+    }
+    if (isLocked && id !== "skills") return;
     setActionPanel(id);
-    if (id === "ult") {
+    if (id === "skills") {
       setUltiPhase("view");
       setUltiReveal(null);
     }
   }
+
+  function exitEquipMode() {
+    if (equipLeaving) return;
+    setEquipLeaving(true);
+  }
+
+  const finishEquipExit = useCallback(() => {
+    setEquipMode(false);
+    setEquipLeaving(false);
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, []);
+
+  const sheetBody = (equipUi) => (
+    <>
+      <div
+        className={cn(
+          equipMode ? "equip-stage" : "flex min-h-0 flex-1 flex-col"
+        )}
+      >
+        <section className={cn("char-hero min-h-0", equipMode && "char-hero--equip")}>
+          <div
+            className={cn(
+              "char-hero__frame char-hero__frame--tall",
+              equipMode && "char-hero__frame--equip",
+              avatarPulse && "avatar-level-flash"
+            )}
+            style={{ boxShadow: `0 4px 0 0 #000, 0 0 28px ${glow}` }}
+          >
+            <button
+              type="button"
+              data-no-lift
+              data-sfx="off"
+              className="char-hero__art-hit"
+              aria-label={equipMode ? "Personaggio" : "Ingrandisci immagine"}
+              onClick={() => {
+                if (!equipMode) setImageZoomed(true);
+              }}
+            >
+              {character.image_url ? (
+                <img
+                  src={character.image_url}
+                  alt={character.char_name}
+                  className={cn("char-hero__art", isLocked && "brightness-75")}
+                  draggable={false}
+                />
+              ) : (
+                <CharacterArt
+                  character={character}
+                  variant="poster"
+                  className={cn("char-hero__art", isLocked && "brightness-75")}
+                />
+              )}
+            </button>
+
+            <div className="char-hero__shade" aria-hidden="true" />
+
+            {equipMode ? (
+              equipUi?.polar
+            ) : (
+              <>
+            <div className="char-hero__top">
+              <div className="flex flex-col items-start gap-1.5">
+                <span
+                  className="char-hero__rarity char-hero__rarity--pop"
+                  style={{ background: `linear-gradient(135deg, ${rarityColor}, #f5a623)` }}
+                >
+                  {character.rarity || "R"}
+                </span>
+                <RarityStars rarity={character.rarity} size={13} />
+              </div>
+              <div className="char-hero__top-right">
+                <span
+                  className="char-hero__attr-orb char-hero__attr-orb--corner"
+                  style={{ background: attr.color, boxShadow: `0 2px 0 0 #000, 0 0 12px ${attr.color}99` }}
+                  title={attr.label}
+                  aria-label={attr.label}
+                >
+                  <AttributeIcon attribute={character.attribute} />
+                </span>
+                {isLocked ? (
+                  <span className="char-hero__badge char-hero__badge--lock char-hero__badge--pop">
+                    <Lock size={12} /> Bloccato
+                  </span>
+                ) : (
+                  inTeam && (
+                    <span className="char-hero__badge char-hero__badge--team char-hero__badge--pop">
+                      <Swords size={12} /> Squadra
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+
+            <div className="char-hero__bottom char-hero__bottom--split">
+              <div className="min-w-0 flex-1">
+                <h1 className="char-hero__name">{character.char_name || "Sconosciuto"}</h1>
+                <div className="char-hero__tags">
+                  <span className="char-hero__stars" aria-label={`Risveglio ${ownedNorm.ascension}`}>
+                    {[0, 1, 2].map((i) => (
+                      <Star
+                        key={i}
+                        size={13}
+                        className={i < ownedNorm.ascension ? "fill-[#f5a623] text-[#f5a623]" : "text-white/25"}
+                      />
+                    ))}
+                  </span>
+                </div>
+
+                <div className="char-traits">
+                  <button
+                    type="button"
+                    data-no-lift
+                    className="char-traits__toggle"
+                    aria-expanded={traitsOpen}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTraitsOpen((v) => !v);
+                    }}
+                  >
+                    <span>Caratteristiche</span>
+                    <ChevronDown
+                      size={13}
+                      className={cn("char-traits__chevron", traitsOpen && "rotate-180")}
+                    />
+                  </button>
+                  <p className="char-traits__faction">{character.faction || "Pirati"}</p>
+                  <AnimatePresence initial={false}>
+                    {traitsOpen && (
+                      <motion.p
+                        key="traits-sub"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="char-traits__sub"
+                      >
+                        {clan?.label || character.faction || "—"}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+              {!isLocked && (
+                <button
+                  type="button"
+                  data-no-lift
+                  className="char-hero__lv-box char-hero__lv-box--br char-hero__lv-box--up char-hero__lv-box--pop"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openAction("level");
+                  }}
+                  aria-label="Aumenta di livello"
+                >
+                  <span className="char-hero__lv">
+                    Lv.{ownedNorm.level}
+                    <span>/60</span>
+                    <ArrowUp size={14} className="char-hero__lv-arrow" aria-hidden="true" />
+                  </span>
+                  <div className="char-hero__xp">
+                    <div
+                      className="char-hero__xp-fill"
+                      style={{ width: `${Math.max(4, (ownedNorm.level / 60) * 100)}%` }}
+                    />
+                  </div>
+                </button>
+              )}
+            </div>
+              </>
+            )}
+
+            {isLocked && !equipMode && (
+              <div className="char-hero__locked">
+                <Lock size={28} className="text-[#f5a623]" />
+                <p>Non ancora reclutato</p>
+                <button type="button" onClick={() => navigate("/gacha")} className="char-hero__gacha">
+                  Vai al Gacha
+                </button>
+              </div>
+            )}
+            {avatarPulse && <div className="avatar-shine" />}
+          </div>
+        </section>
+
+        {equipMode ? (
+          <div className="equip-stage__gui">
+            {equipUi?.toolbar}
+            {equipUi?.bag}
+          </div>
+        ) : null}
+      </div>
+
+        {!equipMode && (
+          <>
+        <nav className="char-actions relative z-20 mt-2 grid w-full shrink-0 grid-cols-4 gap-1.5">
+          {ACTIONS.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              disabled={(isLocked && id !== "skills" && id !== "unique") || (id === "unique" && !unique)}
+              onClick={() => openAction(id)}
+              className={cn(
+                "char-action",
+                id === "unique" && "char-action--unique",
+                id === "awaken" && "char-action--awaken",
+                id === "equip" && "char-action--equip",
+                id === "skills" && "char-action--skills",
+                (!isLocked || id === "skills" || id === "unique") && "active:translate-y-0.5"
+              )}
+            >
+              <Icon size={16} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {/* Tap → espande, abilita scroll e mostra tutte le stats */}
+        <section
+          ref={statsPanelRef}
+          className={cn("char-stats-panel mt-2 shrink-0", statsExpanded && "char-stats-panel--open")}
+        >
+          <button
+            type="button"
+            data-no-lift
+            className="char-stats-panel__hit"
+            onClick={() => (statsExpanded ? closeStatsPanel() : openStatsPanel())}
+            aria-expanded={statsExpanded}
+          >
+            <div className="char-stats char-stats--main">
+              <div className="char-stat">
+                <Swords size={14} />
+                <span>ATK</span>
+                <strong>{atk}</strong>
+              </div>
+              <div className="char-stat">
+                <Shield size={14} />
+                <span>DEF</span>
+                <strong>{def}</strong>
+              </div>
+              <div className="char-stat">
+                <Heart size={14} />
+                <span>PV</span>
+                <strong>{hp}</strong>
+              </div>
+              <div className="char-stat char-stat--class">
+                <span>Classe</span>
+                <strong>{cc.toLocaleString("it-IT")}</strong>
+              </div>
+            </div>
+            <p className="char-stats-panel__hint">
+              <ChevronDown
+                size={12}
+                className={cn("transition-transform", statsExpanded && "rotate-180")}
+              />
+              {statsExpanded ? "Chiudi statistiche" : "Tocca per tutte le statistiche"}
+            </p>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {statsExpanded && (
+              <motion.div
+                key="stats-full"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.28, ease: "easeOut" }}
+                className="overflow-hidden"
+              >
+                <div className="char-stats-full mt-2">
+                  <h2 className="char-stats-full__title">Statistiche complete</h2>
+                  <div className="char-stats-full__grid">
+                    <div className="char-stats-full__item">
+                      <span>Attacco</span>
+                      <strong>{atk}</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Difesa</span>
+                      <strong>{def}</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>PV</span>
+                      <strong>{hp}</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Classe</span>
+                      <strong>{cc.toLocaleString("it-IT")}</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Prob. critico</span>
+                      <strong>{critRate}%</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Res. critico</span>
+                      <strong>{critResist}%</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Rubavita</span>
+                      <strong>{lifestealPct}%</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Regen / round</span>
+                      <strong>{regenRoundPct}%</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Lunga vita</span>
+                      <strong>{longevityPct}%</strong>
+                    </div>
+                    <div className="char-stats-full__item">
+                      <span>Attributo</span>
+                      <strong className="inline-flex items-center gap-1.5">
+                        <span style={{ color: attr.color }} className="inline-flex">
+                          <AttributeIcon
+                            attribute={character.attribute}
+                            className="attr-glyph h-3.5 w-3.5"
+                          />
+                        </span>
+                        {attr.label}
+                      </strong>
+                    </div>
+                    <div className="char-stats-full__item char-stats-full__item--wide">
+                      <span>Ciurma / Clan</span>
+                      <strong>{clan?.label || character.faction || "—"}</strong>
+                    </div>
+                    <div className="char-stats-full__item char-stats-full__item--wide">
+                      <span>Unica · {uType?.label || "—"}</span>
+                      <strong>{unique?.name || "—"}</strong>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+          </>
+        )}
+        {equipUi?.overlays}
+    </>
+  );
 
   return (
     <div className="char-sheet relative flex h-[100dvh] flex-col overflow-hidden text-white">
@@ -310,156 +740,106 @@ export default function CharacterDetail() {
 
       <GameTopBar showBack backTo="/characters" showSettings={false} className="relative z-20 shrink-0" />
 
-      <main className="char-sheet__main relative z-10 mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col px-2 pb-1">
-        {/* Hero: un solo blocco — poster + identità */}
-        <section className="char-hero shrink-0">
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={cn("char-hero__frame", avatarPulse && "avatar-level-flash")}
-            style={{ boxShadow: `0 4px 0 0 #000, 0 0 28px ${glow}` }}
+      <main
+        ref={mainRef}
+        className={cn(
+          "char-sheet__main relative z-10 mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col px-2 pb-3",
+          equipMode || statsExpanded ? "char-sheet__main--scroll game-scroll" : "char-sheet__main--locked",
+          equipMode && "char-sheet__main--equip"
+        )}
+      >
+        {equipMode ? (
+          <CharacterEquipMode
+            ownedId={ownedNorm.id}
+            playerState={playerState}
+            patchPlayerState={patchPlayerState}
+            refresh={refresh}
+            leaving={equipLeaving}
+            onExit={exitEquipMode}
+            onExitDone={finishEquipExit}
           >
-            {character.image_url ? (
-              <img
-                src={character.image_url}
-                alt={character.char_name}
-                className={cn("char-hero__art", isLocked && "brightness-75")}
-                draggable={false}
-              />
-            ) : (
-              <CharacterArt
-                character={character}
-                variant="poster"
-                className={cn("char-hero__art aspect-[3/4]", isLocked && "brightness-75")}
-              />
-            )}
+            {(equipUi) => sheetBody(equipUi)}
+          </CharacterEquipMode>
+        ) : (
+          sheetBody(null)
+        )}
+      </main>
 
-            <div className="char-hero__shade" aria-hidden="true" />
-
-            <div className="char-hero__top">
-              <span
-                className="char-hero__rarity"
-                style={{ background: `linear-gradient(135deg, ${rarityColor}, #f5a623)` }}
-              >
-                {character.rarity || "R"}
-              </span>
-              {!isLocked && (
-                <span className="char-hero__lv">
-                  Lv.{ownedNorm.level}
-                  <span>/60</span>
-                </span>
-              )}
-              {isLocked ? (
-                <span className="char-hero__badge char-hero__badge--lock">
-                  <Lock size={11} /> Bloccato
-                </span>
+      <AnimatePresence>
+        {imageZoomed && (
+          <motion.div
+            key="char-zoom"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Immagine personaggio"
+            className="char-zoom"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => setImageZoomed(false)}
+          >
+            <motion.div
+              className="char-zoom__frame"
+              initial={{ scale: 0.92, opacity: 0.6 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              {character.image_url ? (
+                <img src={character.image_url} alt={character.char_name} className="char-zoom__art" draggable={false} />
               ) : (
-                inTeam && (
-                  <span className="char-hero__badge char-hero__badge--team">
-                    <Swords size={11} /> Squadra
-                  </span>
-                )
+                <CharacterArt character={character} variant="poster" className="char-zoom__art" />
               )}
-            </div>
-
-            <div className="char-hero__bottom">
-              <p className="char-hero__version">{character.version || "—"}</p>
-              <h1 className="char-hero__name">{character.char_name || "Sconosciuto"}</h1>
-              <div className="char-hero__tags">
-                <span className="char-hero__tag" style={{ background: attr.color }}>
-                  {attr.icon} {attr.label}
-                </span>
-                <span className="char-hero__tag char-hero__tag--muted">
-                  <Users size={11} /> {character.faction || "—"}
-                </span>
-                <span className="char-hero__stars" aria-label={`Risveglio ${ownedNorm.ascension}`}>
-                  {[0, 1, 2].map((i) => (
-                    <Star
-                      key={i}
-                      size={12}
-                      className={i < ownedNorm.ascension ? "fill-[#f5a623] text-[#f5a623]" : "text-white/25"}
-                    />
-                  ))}
-                </span>
-              </div>
-              {!isLocked && (
-                <div className="char-hero__xp">
-                  <div
-                    className="char-hero__xp-fill"
-                    style={{ width: `${Math.max(4, (ownedNorm.level / 60) * 100)}%` }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {isLocked && (
-              <div className="char-hero__locked">
-                <Lock size={28} className="text-[#f5a623]" />
-                <p>Non ancora reclutato</p>
-                <button type="button" onClick={() => navigate("/gacha")} className="char-hero__gacha">
-                  Vai al Gacha
-                </button>
-              </div>
-            )}
-            {avatarPulse && <div className="avatar-shine" />}
+            </motion.div>
+            <span className="char-zoom__hint">Tocca per chiudere</span>
           </motion.div>
-        </section>
+        )}
+      </AnimatePresence>
 
-        {/* Prestazioni — una sola riga */}
-        <section className="char-stats shrink-0">
-          <div className="char-stat">
-            <Swords size={14} />
-            <span>ATK</span>
-            <strong>{atk}</strong>
+      <GameModal open={uniqueOpen} onClose={() => setUniqueOpen(false)} title="Unica">
+        {unique && uType && (
+          <div className="space-y-2">
+            <p className="text-[10px] uppercase tracking-widest" style={{ color: uType.color }}>
+              {uType.label}
+            </p>
+            <h3 className="text-lg uppercase tracking-wide text-[#f5a623]">{unique.name}</h3>
+            <p className="text-sm leading-relaxed text-white/80">{unique.description}</p>
+            <p className="text-[10px] uppercase text-white/45">{uType.blurb}</p>
           </div>
-          <div className="char-stat">
-            <Shield size={14} />
-            <span>DEF</span>
-            <strong>{def}</strong>
-          </div>
-          <div className="char-stat">
-            <Heart size={14} />
-            <span>PV</span>
-            <strong>{hp}</strong>
-          </div>
-          <div className="char-stat char-stat--class">
-            <span>Classe</span>
-            <strong>{cc.toLocaleString("it-IT")}</strong>
-          </div>
-        </section>
+        )}
+      </GameModal>
 
-        {/* Abilità */}
-        <section className="char-skills shrink-0">
-          <div className="char-skills__head">
-            <h2>Abilità</h2>
-            <p>Potenza in battaglia da ATK / DEF / Lv</p>
-          </div>
-          <div className="char-skills__list">
-            {normalMoves.map((m, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => openMove(m, i, false)}
-                className={cn("char-skill", `char-skill--${m.type || "attack"}`)}
-              >
-                <span className="char-skill__icon">
-                  <MoveIcon type={m.type} />
+      {/* Pannello abilità */}
+      <GameModal
+        open={actionPanel === "skills" && !selectedMove}
+        onClose={() => setActionPanel(null)}
+        title="Abilità"
+      >
+        <div className="space-y-2">
+          {normalMoves.map((m, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => openMove(m, i, false)}
+              className={cn("char-skill w-full text-left", `char-skill--${m.type || "attack"}`)}
+            >
+              <span className="char-skill__icon">
+                <MoveIcon type={m.type} />
+              </span>
+              <span className="char-skill__body">
+                <span className="char-skill__name">{m.name}</span>
+                <span className="char-skill__type">
+                  {m.type === "heal" ? "Cura" : m.type === "buff" ? "Buff" : "Attacco"} · pot. {m.power}
                 </span>
-                <span className="char-skill__body">
-                  <span className="char-skill__name">{m.name}</span>
-                  <span className="char-skill__type">
-                    {m.type === "heal" ? "Cura" : m.type === "buff" ? "Buff" : "Attacco"}
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-
+              </span>
+            </button>
+          ))}
           {ultMove && (
             <button
               type="button"
               onClick={() => openMove(ultMove, 3, true)}
-              className="char-ult"
+              className="char-ult w-full"
             >
               <span className="char-ult__badge">ULT</span>
               <span className="char-ult__icon">
@@ -468,51 +848,13 @@ export default function CharacterDetail() {
               <span className="char-ult__body">
                 <span className="char-ult__name">{ultMove.name}</span>
                 <span className="char-ult__meta">
-                  Lv.{ownedNorm.ultimateLevel}
-                  <span className="char-ult__hearts">
-                    {Array.from({ length: ULTIMATE_MAX_LEVEL - ULTIMATE_MIN_LEVEL + 1 }).map((_, i) => {
-                      const lv = i + ULTIMATE_MIN_LEVEL;
-                      return (
-                        <Heart
-                          key={lv}
-                          size={10}
-                          className={
-                            lv <= ownedNorm.ultimateLevel
-                              ? "fill-[#1a1008] text-[#1a1008]"
-                              : "text-black/25"
-                          }
-                        />
-                      );
-                    })}
-                  </span>
-                  <span className="inline-flex items-center gap-0.5">
-                    <Hexagon size={10} /> {ownedNorm.ultimateTokens}
-                  </span>
+                  Lv.{ownedNorm.ultimateLevel} · tocca per potenziare
                 </span>
               </span>
             </button>
           )}
-        </section>
-      </main>
-
-      <nav className="char-actions relative z-20 mx-auto grid w-full max-w-lg shrink-0 grid-cols-4 gap-1.5 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1">
-        {ACTIONS.map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            type="button"
-            disabled={isLocked}
-            onClick={() => openAction(id)}
-            className={cn(
-              "char-action",
-              id === "equip" && "char-action--muted",
-              !isLocked && "active:translate-y-0.5"
-            )}
-          >
-            <Icon size={16} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
+        </div>
+      </GameModal>
 
       {/* Move sheet */}
       <GameModal
@@ -523,16 +865,20 @@ export default function CharacterDetail() {
         {selectedMove && !selectedMove.isUlt && (
           <>
             <h3 className="text-lg uppercase tracking-wide text-white">{selectedMove.move.name}</h3>
-            <p className="mt-2 text-sm text-white/70">
+            <p className="mt-2 text-sm leading-relaxed text-white/80">
               {selectedMove.move.description || "Nessuna descrizione"}
             </p>
             <div className="mt-4 flex items-center justify-between rounded-xl border-2 border-black bg-[#0b161b] px-3 py-2">
               <span className="flex items-center gap-1 text-xs uppercase text-white/70">
                 <MoveIcon type={selectedMove.move.type} />
-                {selectedMove.move.type}
+                {selectedMove.move.type === "heal"
+                  ? "Cura"
+                  : selectedMove.move.type === "buff"
+                    ? "Buff"
+                    : "Attacco"}
               </span>
-              <span className="text-[10px] uppercase tracking-wide text-white/45">
-                Potenza da prestazioni
+              <span className="text-[10px] uppercase tracking-wide text-[#f5a623]">
+                Potenza {selectedMove.move.power}
               </span>
             </div>
           </>
@@ -540,11 +886,10 @@ export default function CharacterDetail() {
       </GameModal>
 
       <GameModal
-        open={!!selectedMove?.isUlt || actionPanel === "ult"}
+        open={!!selectedMove?.isUlt}
         onClose={() => {
           if (ultiPhase === "animating") return;
           closeMoveSheet();
-          if (actionPanel === "ult") setActionPanel(null);
         }}
         title="Ultimate"
         closeOnOverlay={ultiPhase !== "animating"}
@@ -645,39 +990,6 @@ export default function CharacterDetail() {
         </button>
       </GameModal>
 
-      <GameModal open={actionPanel === "equip"} onClose={() => setActionPanel(null)} title="Equipaggiamento">
-        <p className="mb-3 text-[10px] uppercase tracking-wide text-white/55">
-          Slot gear · forging e drop in arrivo
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          {EQUIP_SLOTS.map((slot) => (
-            <button
-              key={slot.id}
-              type="button"
-              className={cn(
-                "flex flex-col items-center gap-1.5 rounded-xl border-2 border-black bg-[#0b161b] px-2 py-3 text-center shadow-[0_2px_0_0_#000]",
-                slot.rare && "ring-1 ring-[#c084fc]/50"
-              )}
-            >
-              <div
-                className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-lg border-2 border-dashed border-white/25",
-                  slot.rare && "border-[#c084fc]/50"
-                )}
-              >
-                <Shirt size={16} className={slot.rare ? "text-[#c084fc]" : "text-white/35"} />
-              </div>
-              <span className={cn("text-[9px] font-bold uppercase", slot.rare ? "text-[#c084fc]" : "text-white/70")}>
-                {slot.label}
-              </span>
-              <span className="text-[8px] uppercase text-white/35">Vuoto</span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-3 text-center text-[9px] uppercase text-[#f5a623]">
-          Essenza = pezzo raro da forgiare / farmare
-        </p>
-      </GameModal>
     </div>
   );
 }

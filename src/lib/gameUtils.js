@@ -18,10 +18,11 @@ export const RARITY_GLOW = {
 
 export const RARITY_STARS = { C: 1, R: 2, SR: 3, SSR: 4 };
 
+/** Attributi: icone SVG via AttributeIcon (niente emoji). */
 export const ATTRIBUTE_INFO = {
-  Forza: { icon: "💪", color: "#E11D48", label: "Forza" },
-  Velocità: { icon: "⚡", color: "#0EA5E9", label: "Agilità" },
-  Tecnica: { icon: "🧠", color: "#8B5CF6", label: "Tecnica" },
+  Forza: { iconId: "Forza", color: "#E11D48", label: "Forza" },
+  Velocità: { iconId: "Velocità", color: "#0EA5E9", label: "Agilità" },
+  Tecnica: { iconId: "Tecnica", color: "#8B5CF6", label: "Tecnica" },
 };
 
 export const TYPE_TRIANGLE = {

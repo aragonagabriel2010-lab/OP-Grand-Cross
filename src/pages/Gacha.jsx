@@ -10,8 +10,10 @@ import { CharacterArt } from "@/components/game/CharacterCard";
 import RarityStars from "@/components/game/RarityStars";
 import { TEAL, AMBER, PANEL } from "@/lib/arcade";
 import { rollRarity, RARITY_GLOW, ATTRIBUTE_INFO, GACHA_RATES, RARITY_COLORS } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
 import { Gem, Sparkles, X } from "lucide-react";
 import GachaHeroBanner from "@/components/game/GachaHeroBanner";
+import CharacterPreviewModal from "@/components/game/CharacterPreviewModal";
 import { recordGachaPull } from "@/lib/playerStats";
 import { addCharacter } from "@/lib/ultimate";
 import { loadPity, savePity, rollRarityWithPity } from "@/lib/gachaPity";
@@ -24,6 +26,7 @@ export default function Gacha() {
   const [results, setResults] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [ratesOpen, setRatesOpen] = useState(false);
+  const [previewChar, setPreviewChar] = useState(null);
   const [flipPhase, setFlipPhase] = useState(false);
   const [pity, setPity] = useState({ sinceSr: 0, sinceSsr: 0 });
 
@@ -215,12 +218,20 @@ export default function Gacha() {
               ) : (
                 <ul className="space-y-1">
                   {tier.list.map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-center justify-between gap-2 border-t border-white/10 py-1.5 text-[11px] uppercase"
-                    >
-                      <span className="truncate text-white">{c.char_name}</span>
-                      <span className="shrink-0 text-white/45">{c.version}</span>
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewChar(c)}
+                        className="flex w-full items-center justify-between gap-2 border-t border-white/10 py-2 text-left text-[11px] uppercase transition-colors hover:bg-white/5"
+                      >
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="font-bold text-white">{c.char_name}</span>
+                          {c.version && (
+                            <span className="text-white/45"> · {c.version}</span>
+                          )}
+                        </span>
+                        <span className="shrink-0 text-[9px] text-[#f5a623]">Dettagli ›</span>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -239,6 +250,12 @@ export default function Gacha() {
           </div>
         </div>
       </GameModal>
+
+      <CharacterPreviewModal
+        open={!!previewChar}
+        onClose={() => setPreviewChar(null)}
+        character={previewChar}
+      />
 
       <AnimatePresence>
         {showModal && (
@@ -317,10 +334,10 @@ export default function Gacha() {
                               <RarityStars rarity={c.rarity} size={10} />
                             </div>
                             <div
-                              className="absolute -bottom-1 -left-1 flex h-5 w-5 items-center justify-center rounded border border-black text-[9px]"
+                              className="absolute -bottom-1 -left-1 flex h-5 w-5 items-center justify-center rounded border border-black text-white"
                               style={{ background: attr?.color }}
                             >
-                              {attr?.icon}
+                              <AttributeIcon attribute={c.attribute} className="attr-glyph h-3 w-3" />
                             </div>
                           </div>
                           <p className="w-full truncate text-center text-[10px] font-bold uppercase text-white">

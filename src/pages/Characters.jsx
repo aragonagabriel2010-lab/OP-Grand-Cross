@@ -12,11 +12,12 @@ import FilterPanel from "@/components/game/characters/FilterPanel";
 import SortMenu, { SORT_OPTIONS } from "@/components/game/characters/SortMenu";
 import { TEAL, AMBER, PANEL } from "@/lib/arcade";
 import { effectiveHp, effectiveAttack, ATTRIBUTE_INFO, RARITY_ORDER } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
 import { Users, Search, X, Swords, Filter } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-const EMPTY_FILTERS = { attributes: [], factions: [], ownership: "all" };
+const EMPTY_FILTERS = { attributes: [], factions: [], uniqueTypes: [], ownership: "all" };
 const TEAM_SIZE = 4;
 
 function emptyTeam() {
@@ -138,6 +139,11 @@ export default function Characters() {
     if (filters.factions.length) {
       list = list.filter((o) => filters.factions.includes(charMap[o.character_id].faction));
     }
+    if ((filters.uniqueTypes || []).length) {
+      list = list.filter((o) =>
+        (filters.uniqueTypes || []).includes(charMap[o.character_id]?.unique?.type)
+      );
+    }
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter((o) => {
@@ -145,7 +151,8 @@ export default function Characters() {
         return (
           c.char_name.toLowerCase().includes(q) ||
           (c.version || "").toLowerCase().includes(q) ||
-          (c.arc || "").toLowerCase().includes(q)
+          (c.arc || "").toLowerCase().includes(q) ||
+          (c.unique?.name || "").toLowerCase().includes(q)
         );
       });
     }
@@ -160,6 +167,9 @@ export default function Characters() {
     }
     if (filters.factions.length) {
       list = list.filter((c) => filters.factions.includes(c.faction));
+    }
+    if ((filters.uniqueTypes || []).length) {
+      list = list.filter((c) => (filters.uniqueTypes || []).includes(c.unique?.type));
     }
     if (query.trim()) {
       const q = query.trim().toLowerCase();
@@ -182,6 +192,7 @@ export default function Characters() {
   const filterActive =
     filters.attributes.length > 0 ||
     filters.factions.length > 0 ||
+    (filters.uniqueTypes || []).length > 0 ||
     ownership !== "all";
   const searchActive = query.trim().length > 0;
   const sortLabel = SORT_OPTIONS.find((o) => o.id === sortId)?.label || "Ordina";
@@ -391,10 +402,10 @@ export default function Characters() {
                               <RarityStars rarity={c.rarity} size={8} />
                             </div>
                             <div
-                              className="absolute -bottom-1 -left-1 z-[1] flex h-5 w-5 items-center justify-center rounded border-2 border-black text-[9px]"
+                              className="absolute -bottom-1 -left-1 z-[1] flex h-5 w-5 items-center justify-center rounded border-2 border-black text-white"
                               style={{ background: attr?.color }}
                             >
-                              {attr?.icon}
+                              <AttributeIcon attribute={c.attribute} className="attr-glyph h-3 w-3" />
                             </div>
                             <div
                               className={`absolute -bottom-1 -right-1 z-[1] rounded border border-black px-1 py-0.5 text-[8px] font-bold ${AMBER}`}
@@ -463,10 +474,10 @@ export default function Characters() {
                               <RarityStars rarity={c.rarity} size={8} />
                             </div>
                             <div
-                              className="absolute -bottom-1 -left-1 z-[1] flex h-5 w-5 items-center justify-center rounded border-2 border-black text-[9px] opacity-80"
+                              className="absolute -bottom-1 -left-1 z-[1] flex h-5 w-5 items-center justify-center rounded border-2 border-black text-white opacity-80"
                               style={{ background: attr?.color }}
                             >
-                              {attr?.icon}
+                              <AttributeIcon attribute={c.attribute} className="attr-glyph h-3 w-3" />
                             </div>
                           </div>
                           <p className="w-full truncate text-center text-[8px] font-bold uppercase leading-tight text-white/50">

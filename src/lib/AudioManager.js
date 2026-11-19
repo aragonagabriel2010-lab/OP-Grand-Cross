@@ -295,6 +295,87 @@ class AudioManagerClass {
     osc.stop(t0 + 0.24);
   }
 
+  /** Level up personaggio */
+  playLevelUp() {
+    if (!this._sfxEnabled()) return;
+    const ctx = this._ensureRunning();
+    if (!ctx || !this.master) {
+      this.boot();
+      return;
+    }
+    const vol = 0.45;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(220, t0);
+    osc.frequency.exponentialRampToValueAtTime(660, t0 + 0.22);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + 0.42);
+
+    const chime = ctx.createOscillator();
+    const cg = ctx.createGain();
+    chime.type = "sine";
+    chime.frequency.setValueAtTime(990, t0 + 0.12);
+    chime.frequency.exponentialRampToValueAtTime(1320, t0 + 0.32);
+    cg.gain.setValueAtTime(0.0001, t0 + 0.12);
+    cg.gain.exponentialRampToValueAtTime(vol * 0.55, t0 + 0.14);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.38);
+    chime.connect(cg);
+    cg.connect(this.master);
+    chime.start(t0 + 0.12);
+    chime.stop(t0 + 0.4);
+  }
+
+  /** Risveglio / ascensione */
+  playAwaken() {
+    if (!this._sfxEnabled()) return;
+    const ctx = this._ensureRunning();
+    if (!ctx || !this.master) {
+      this.boot();
+      return;
+    }
+    const vol = 0.5;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(110, t0);
+    osc.frequency.exponentialRampToValueAtTime(440, t0 + 0.4);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.65);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + 0.68);
+
+    [660, 880, 1100].forEach((freq, i) => {
+      const spark = ctx.createOscillator();
+      const sg = ctx.createGain();
+      const start = t0 + 0.15 + i * 0.08;
+      spark.type = "sine";
+      spark.frequency.setValueAtTime(freq, start);
+      sg.gain.setValueAtTime(0.0001, start);
+      sg.gain.exponentialRampToValueAtTime(vol * 0.4, start + 0.02);
+      sg.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
+      spark.connect(sg);
+      sg.connect(this.master);
+      spark.start(start);
+      spark.stop(start + 0.22);
+    });
+  }
+
+  /** Potenziamento ultimata */
+  playUltUpgrade() {
+    this.playUlt();
+  }
+
   getSettings() {
     return loadAudioSettings();
   }

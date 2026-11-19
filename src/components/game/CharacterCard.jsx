@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import RarityStars from "./RarityStars";
 import { ATTRIBUTE_INFO, RARITY_GLOW } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
 
 /**
  * Arte personaggio: bounty poster (pirati) / riquadro Marina / etc. via image_url.
@@ -84,7 +85,7 @@ export default function CharacterCard({ character, owned, onClick, className, se
           className="absolute -bottom-1 -left-1 flex h-6 w-6 items-center justify-center rounded border-2 border-black text-[10px]"
           style={{ background: attr.color }}
         >
-          <span>{attr.icon}</span>
+          <AttributeIcon attribute={character.attribute} className="attr-glyph h-3 w-3 text-white" />
         </div>
         {owned && !compact && (
           <div className="absolute -bottom-1 -right-1 rounded border border-black bg-[#f5a623] px-1 py-0.5 text-[8px] font-bold text-black">

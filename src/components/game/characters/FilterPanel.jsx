@@ -1,6 +1,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { TEAL, AMBER, PANEL_SM } from "@/lib/arcade";
 import { ATTRIBUTE_INFO } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
+import { UNIQUE_TYPES, UNIQUE_TYPE_LIST } from "@/lib/uniques";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,12 +35,21 @@ export default function FilterPanel({ open, onClose, filters, onChange }) {
     onChange({ ...filters, factions: [...next] });
   };
 
+  const toggleUnique = (key) => {
+    const next = new Set(filters.uniqueTypes || []);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onChange({ ...filters, uniqueTypes: [...next] });
+  };
+
   const setOwnership = (id) => onChange({ ...filters, ownership: id });
 
-  const clear = () => onChange({ attributes: [], factions: [], ownership: "all" });
+  const clear = () =>
+    onChange({ attributes: [], factions: [], uniqueTypes: [], ownership: "all" });
   const hasFilters =
     filters.attributes.length > 0 ||
     filters.factions.length > 0 ||
+    (filters.uniqueTypes || []).length > 0 ||
     (filters.ownership && filters.ownership !== "all");
 
   return (
@@ -100,7 +111,9 @@ export default function FilterPanel({ open, onClose, filters, onChange }) {
                       on ? AMBER : "bg-[#0b161b] text-white"
                     )}
                   >
-                    <span className="mr-1">{info?.icon}</span>
+                    <span className="mr-1 inline-flex align-middle" style={{ color: on ? undefined : info?.color }}>
+                      <AttributeIcon attribute={key} className="attr-glyph h-3 w-3" />
+                    </span>
                     {label}
                   </button>
                 );
@@ -122,6 +135,28 @@ export default function FilterPanel({ open, onClose, filters, onChange }) {
                     )}
                   >
                     {f}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mb-2 text-[10px] uppercase tracking-widest text-[#f5a623]">Unica</p>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {UNIQUE_TYPE_LIST.map((id) => {
+                const info = UNIQUE_TYPES[id];
+                const on = (filters.uniqueTypes || []).includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => toggleUnique(id)}
+                    className={cn(
+                      "rounded-lg border-2 border-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide shadow-[0_2px_0_0_#000]",
+                      on ? AMBER : "bg-[#0b161b] text-white"
+                    )}
+                    style={on ? undefined : { boxShadow: `0 2px 0 0 #000, inset 0 0 0 1px ${info.color}55` }}
+                  >
+                    {info.label}
                   </button>
                 );
               })}

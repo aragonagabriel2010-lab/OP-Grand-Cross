@@ -4,6 +4,7 @@ import { Settings, Gift, Info, Flag, X } from "lucide-react";
 import GameModal from "@/components/game/GameModal";
 import SettingsModal from "@/components/game/SettingsModal";
 import { ATTRIBUTE_INFO, TYPE_TRIANGLE } from "@/lib/gameUtils";
+import { AttributeIcon } from "@/components/game/AttributeIcons";
 import { TEAL, PANEL_SM } from "@/lib/arcade";
 import { cn } from "@/lib/utils";
 import { AudioManager } from "@/lib/AudioManager";
@@ -148,20 +149,20 @@ export default function BattleMenu({
                 >
                   <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-white">
                     <span
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-black text-sm"
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-black text-white"
                       style={{ background: a.color }}
                     >
-                      {a.icon}
+                      <AttributeIcon attribute={atk} className="attr-glyph h-3.5 w-3.5" />
                     </span>
                     {a.label || atk}
                   </span>
                   <span className="text-[9px] font-black uppercase text-[#f5a623]">▶</span>
                   <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-white/80">
                     <span
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-black text-sm"
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-black text-white"
                       style={{ background: d.color }}
                     >
-                      {d.icon}
+                      <AttributeIcon attribute={def} className="attr-glyph h-3.5 w-3.5" />
                     </span>
                     {d.label || def}
                   </span>

@@ -7,6 +7,7 @@ import { loadAudioSettings, saveAudioSettings } from "@/lib/audioSettings";
 import { computePlayerStats } from "@/lib/playerStats";
 import { updateDisplayName } from "@/lib/firebase";
 import { TEAL, AMBER, PANEL, PANEL_SM } from "@/lib/arcade";
+import { THEMES, applyTheme, loadThemeId } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import {
   X,
@@ -18,10 +19,12 @@ import {
   Copy,
   Check,
   Loader2,
+  Monitor,
 } from "lucide-react";
 
 const TABS = [
   { id: "account", label: "Account", icon: User },
+  { id: "display", label: "Schermo", icon: Monitor },
   { id: "stats", label: "Statistiche", icon: BarChart3 },
   { id: "audio", label: "Audio", icon: Volume2 },
 ];
@@ -62,6 +65,7 @@ export default function SettingsModal({ open, onClose, initialTab = "account" })
 
   const [tab, setTab] = useState(initialTab);
   const [audio, setAudio] = useState(loadAudioSettings);
+  const [themeId, setThemeId] = useState(loadThemeId);
   const [displayName, setDisplayName] = useState("");
   const [nameSaving, setNameSaving] = useState(false);
   const [nameMsg, setNameMsg] = useState("");
@@ -73,11 +77,17 @@ export default function SettingsModal({ open, onClose, initialTab = "account" })
     if (open) {
       setTab(initialTab);
       setAudio(loadAudioSettings());
+      setThemeId(loadThemeId());
       setDisplayName(user?.full_name || user?.displayName || "");
       setConfirmLogout(false);
       setNameMsg("");
     }
   }, [open, initialTab, user]);
+
+  function onPickTheme(id) {
+    const next = applyTheme(id);
+    setThemeId(next.id);
+  }
 
   const stats = computePlayerStats({ owned, charMap, playerState });
 
@@ -232,6 +242,65 @@ export default function SettingsModal({ open, onClose, initialTab = "account" })
                       </div>
                       {nameMsg && <p className="text-[10px] text-[#f5a623]">{nameMsg}</p>}
                     </form>
+                  </div>
+                )}
+
+                {tab === "display" && (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-[9px] uppercase tracking-widest text-[#f5a623]">Temi</p>
+                      <p className="mt-1 text-[10px] uppercase leading-relaxed tracking-wide text-white/50">
+                        Voyage è l’ufficiale. Lanterna è morbido, Harbor dà focus, Mugiwara è a tema One Piece.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      {THEMES.map((theme) => {
+                        const on = themeId === theme.id;
+                        return (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            onClick={() => onPickTheme(theme.id)}
+                            className={cn(
+                              "flex w-full items-stretch gap-3 rounded-xl border-2 border-black p-2.5 text-left shadow-[0_3px_0_0_#000]",
+                              on ? AMBER : "bg-[#0b161b]"
+                            )}
+                          >
+                            <div
+                              className="flex h-14 w-14 shrink-0 flex-col overflow-hidden rounded-lg border-2 border-black"
+                              aria-hidden="true"
+                            >
+                              <span className="h-1/2 w-full" style={{ background: theme.preview.bg }} />
+                              <span className="flex h-1/2 w-full">
+                                <span className="w-1/2" style={{ background: theme.preview.panel }} />
+                                <span className="w-1/2" style={{ background: theme.preview.accent }} />
+                              </span>
+                            </div>
+                            <div className="min-w-0 flex-1 self-center">
+                              <div className="flex items-center gap-2">
+                                <p className={cn("text-sm font-bold uppercase", on ? "text-black" : "text-white")}>
+                                  {theme.number}. {theme.label}
+                                </p>
+                                <span
+                                  className={cn(
+                                    "rounded border border-black px-1.5 py-0.5 text-[8px] font-black uppercase",
+                                    on ? "bg-black text-[#f5a623]" : "bg-[#164446] text-[#f5a623]"
+                                  )}
+                                >
+                                  {theme.badge}
+                                </span>
+                              </div>
+                              <p className={cn("mt-1 text-[10px] uppercase leading-snug", on ? "text-black/70" : "text-white/50")}>
+                                {theme.hint}
+                              </p>
+                            </div>
+                            {on && (
+                              <span className="self-center text-[10px] font-black uppercase text-black">Attivo</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 

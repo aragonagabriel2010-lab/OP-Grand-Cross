@@ -95,6 +95,7 @@ import {
 import { loadMatch, clearMatch, buildChapterForMatch } from "@/lib/pvpMatch";
 import { buildPublicProfile, publishPublicProfile } from "@/lib/friends";
 import { useAuth } from "@/lib/AuthContext";
+import { collectUniqueModifiers } from "@/lib/uniques";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ULT_MAX = 6;
@@ -103,18 +104,25 @@ const ULT_MAX = 6;
 function aliveEnemyIndex(list, preferred = 0) {
   if (!list?.length) return -1;
   const pref = Number(preferred);
-  if (Number.isInteger(pref) && pref >= 0 && pref < list.length && list[pref].hp > 0) {
+  if (
+    Number.isInteger(pref) &&
+    pref >= 0 &&
+    pref < list.length &&
+    Number(list[pref]?.hp) > 0
+  ) {
     return pref;
   }
-  return list.findIndex((e) => e.hp > 0);
+  return list.findIndex((e) => Number(e?.hp) > 0);
 }
 
 function syncEnemies(list, setEnemies, enemiesRef) {
-  const next = list.map((e) => ({ ...e }));
+  const next = list.map((e) => ({ ...e, hp: Math.max(0, Number(e.hp) || 0) }));
   enemiesRef.current = next;
   setEnemies(next);
   return next;
 }
+
+const MERGE_UNION_MS = 480;
 
 export default function Battle() {
   const { chapterNumber } = useParams();
@@ -147,7 +155,8 @@ export default function Battle() {
   const [floaters, setFloaters] = useState([]);
   const [busy, setBusy] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  const [mergeFlash, setMergeFlash] = useState([]);
+  /** id carta → ruolo animazione fusione */
+  const [mergeFlash, setMergeFlash] = useState({});
   const [mergeBanner, setMergeBanner] = useState(null);
   const [ultCinematic, setUltCinematic] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -173,15 +182,22 @@ export default function Battle() {
   const ultRef = useRef([]);
   const staminaLockRef = useRef(false);
   const autoFightLockRef = useRef(false);
+  /** Evita re-entrancy / busy stale da closure */
+  const busyRef = useRef(false);
+  const mergeAnimTimersRef = useRef([]);
+  const mergeLockRef = useRef(false);
   /** Quota cure/buff: 3 ogni 6 turni */
   const supportQuotaRef = useRef({ window: 0, drawn: 0 });
   const benchRef = useRef(null);
   const openingMembersRef = useRef([]);
   const openingBenchRef = useRef(null);
   const foodAtkMultRef = useRef(1);
+  const uniqueAtkMultRef = useRef(1);
+  const uniqueDefMultRef = useRef(1);
   const foodBuffTurnsRef = useRef(null); // null = duration battle; number = turns left
   /** Evita che un click parta dopo un drag sulla mano */
   const didDragRef = useRef(false);
+  const [handDragging, setHandDragging] = useState(false);
 
   function pushLog(msg) {
     setLog((l) => [...l.slice(-3), msg]);
@@ -230,16 +246,46 @@ export default function Battle() {
     return best;
   }
 
-  /** Feedback fusioni automatiche */
-  function flashMerges(merges) {
+  function clearMergeAnimTimers() {
+    mergeAnimTimersRef.current.forEach((t) => window.clearTimeout(t));
+    mergeAnimTimersRef.current = [];
+  }
+
+  function scheduleMergeTimer(fn, ms) {
+    const t = window.setTimeout(fn, ms);
+    mergeAnimTimersRef.current.push(t);
+    return t;
+  }
+
+  function selectAliveTarget(list, preferred) {
+    const idx = aliveEnemyIndex(list, preferred);
+    if (idx >= 0) setTarget(idx);
+    return idx;
+  }
+
+  /** Feedback fusioni automatiche (+ ruoli per animazione unione) */
+  function flashMerges(merges, { unionIds = false } = {}) {
     if (!merges?.length) return;
     const best = merges.reduce((a, b) => (b.intoStars > a.intoStars ? b : a), merges[0]);
     merges.forEach((m) => {
       pushLog(`Fusione! → ${m.intoStars}★ ${starLabel(m.intoStars)}`);
     });
-    const ids = merges.map((m) => m.card.id);
-    setMergeFlash(ids);
-    setMergeBanner({ id: `m_${Date.now()}`, intoStars: best.intoStars });
+    const roles = {};
+    if (unionIds) {
+      merges.forEach((m) => {
+        if (m.leftId) roles[m.leftId] = "left";
+        if (m.rightId) roles[m.rightId] = "right";
+      });
+    }
+    merges.forEach((m) => {
+      if (m.card?.id) roles[m.card.id] = "result";
+    });
+    setMergeFlash(roles);
+    setMergeBanner({
+      id: `m_${Date.now()}`,
+      intoStars: best.intoStars,
+      union: true,
+    });
     AudioManager.playMerge(best.intoStars);
     void import("@/lib/dailies")
       .then(({ bumpDaily }) => {
@@ -247,16 +293,47 @@ export default function Battle() {
         if (uid) bumpDaily(uid, "merge_cards");
       })
       .catch(() => {});
-    setTimeout(() => setMergeFlash([]), 700);
-    setTimeout(() => setMergeBanner(null), 900);
+    scheduleMergeTimer(() => setMergeBanner(null), 1000);
   }
 
-  function commitHand(result) {
-    setHand(result.hand);
-    flashMerges(result.merges);
+  /**
+   * Applica mano. Se ci sono fusioni e `fromHand` (mano pre-merge),
+   * mostra prima le due carte che scorrono una verso l'altra, poi il risultato.
+   */
+  function commitHand(result, { fromHand = null } = {}) {
     if (typeof result.supportDrawn === "number") {
       supportQuotaRef.current.drawn = result.supportDrawn;
     }
+    if (!result.merges?.length) {
+      setHand(result.hand);
+      return result.hand;
+    }
+
+    clearMergeAnimTimers();
+    const canAnimateUnion =
+      fromHand?.length &&
+      result.merges.some((m) => m.leftId && m.rightId && fromHand.some((c) => c.id === m.leftId));
+
+    if (canAnimateUnion) {
+      mergeLockRef.current = true;
+      setHand(fromHand);
+      flashMerges(result.merges, { unionIds: true });
+      scheduleMergeTimer(() => {
+        setHand(result.hand);
+        const resultRoles = {};
+        result.merges.forEach((m) => {
+          if (m.card?.id) resultRoles[m.card.id] = "result";
+        });
+        setMergeFlash(resultRoles);
+        mergeLockRef.current = false;
+        scheduleMergeTimer(() => setMergeFlash({}), 520);
+      }, MERGE_UNION_MS);
+      return result.hand;
+    }
+
+    setHand(result.hand);
+    flashMerges(result.merges);
+    scheduleMergeTimer(() => setMergeFlash({}), 700);
     return result.hand;
   }
 
@@ -289,8 +366,9 @@ export default function Battle() {
 
   /** Togli una carta dalla mano e fondi subito le adiacenze create (gratis). */
   function removeFromHandAndMerge(cardId) {
-    const result = resolveAdjacentMerges(hand.filter((c) => c.id !== cardId));
-    commitHand(result);
+    const filtered = hand.filter((c) => c.id !== cardId);
+    const result = resolveAdjacentMerges(filtered);
+    commitHand(result, { fromHand: filtered });
     return result;
   }
 
@@ -321,7 +399,9 @@ export default function Battle() {
       if (typeof result.supportDrawn === "number") {
         supportQuotaRef.current.drawn = result.supportDrawn;
       }
-      flashMerges([...(cleaned.merges || []), ...(result.merges || [])]);
+      const allMerges = [...(cleaned.merges || []), ...(result.merges || [])];
+      flashMerges(allMerges);
+      if (allMerges.length) scheduleMergeTimer(() => setMergeFlash({}), 700);
       setActionQueue((q) =>
         pruneStalePlays(prunePlaysForCharacter(q, ci), destroyedIdsFromMerges(result.merges))
       );
@@ -335,6 +415,7 @@ export default function Battle() {
     setHand((h) => {
       const result = removeCharacterCards(h, ci);
       flashMerges(result.merges);
+      if (result.merges?.length) scheduleMergeTimer(() => setMergeFlash({}), 700);
       setActionQueue((q) =>
         pruneStalePlays(prunePlaysForCharacter(q, ci), destroyedIdsFromMerges(result.merges))
       );
@@ -343,6 +424,7 @@ export default function Battle() {
   }
 
   function beginPlayerPlanning(nextHand) {
+    selectAliveTarget(enemiesRef.current, target);
     setActionQueue([]);
     if (nextHand) {
       setTurnHandSnapshot(cloneHand(nextHand));
@@ -359,15 +441,18 @@ export default function Battle() {
   }, [phase, busy, hand, turnHandSnapshot]);
 
   function resetTurnActions() {
-    if (busy || phase !== "player" || !turnHandSnapshot) return;
+    if (busy || busyRef.current || mergeLockRef.current || phase !== "player" || !turnHandSnapshot) return;
     autoFightLockRef.current = false;
+    clearMergeAnimTimers();
+    mergeLockRef.current = false;
+    setMergeFlash({});
     setHand(cloneHand(turnHandSnapshot));
     setActionQueue([]);
     pushLog("Mosse annullate — mano ripristinata");
   }
 
   function playCardFromHand(cardId) {
-    if (busy || phase !== "player" || didDragRef.current) return;
+    if (busy || busyRef.current || mergeLockRef.current || phase !== "player" || didDragRef.current) return;
     const maxSlots = aliveMembers().length;
     const tile = hand.find((c) => c.id === cardId);
     if (!tile) return;
@@ -375,22 +460,28 @@ export default function Battle() {
       pushLog("Nessuno slot azione libero");
       return;
     }
+    const liveTarget = aliveEnemyIndex(enemiesRef.current, target);
     const merged = removeFromHandAndMerge(cardId);
     setActionQueue((q) =>
-      pruneStalePlays(queuePlay(q, cardId, tile, target), destroyedIdsFromMerges(merged.merges))
+      pruneStalePlays(
+        queuePlay(q, cardId, tile, liveTarget >= 0 ? liveTarget : target),
+        destroyedIdsFromMerges(merged.merges)
+      )
     );
     AudioManager.playClick();
   }
 
   function onDragStart() {
     didDragRef.current = true;
+    setHandDragging(true);
   }
 
   function onDragEnd(result) {
+    setHandDragging(false);
     window.setTimeout(() => {
       didDragRef.current = false;
     }, 0);
-    if (busy || phase !== "player") return;
+    if (busy || busyRef.current || mergeLockRef.current || phase !== "player") return;
     const { source, destination, draggableId } = result;
     if (!destination) return;
 
@@ -405,9 +496,13 @@ export default function Battle() {
         pushLog("Nessuno slot azione libero");
         return;
       }
+      const liveTarget = aliveEnemyIndex(enemiesRef.current, target);
       const merged = removeFromHandAndMerge(draggableId);
       setActionQueue((q) =>
-        pruneStalePlays(queuePlay(q, draggableId, tile, target), destroyedIdsFromMerges(merged.merges))
+        pruneStalePlays(
+          queuePlay(q, draggableId, tile, liveTarget >= 0 ? liveTarget : target),
+          destroyedIdsFromMerges(merged.merges)
+        )
       );
       return;
     }
@@ -421,7 +516,7 @@ export default function Battle() {
       }
       const reordered = reorderList(hand, source.index, destination.index);
       const merged = resolveAdjacentMerges(reordered);
-      commitHand(merged);
+      commitHand(merged, { fromHand: reordered });
       setActionQueue((q) =>
         pruneStalePlays(queueMove(q, source.index, destination.index), destroyedIdsFromMerges(merged.merges))
       );
@@ -510,7 +605,12 @@ export default function Battle() {
 
       if (members.length === 0) { navigate("/characters"); return; }
 
-      const maxes = members.map((m) => effectiveHp(m.character, m.owned));
+      const { mods: uniqueMods } = collectUniqueModifiers(members, subMember, charMap);
+      uniqueAtkMultRef.current = uniqueMods.atk || 1;
+      uniqueDefMultRef.current = uniqueMods.def || 1;
+      const maxes = members.map((m) =>
+        Math.max(1, Math.round(effectiveHp(m.character, m.owned) * (uniqueMods.hp || 1)))
+      );
       memberHpRef.current = [...maxes];
       memberMaxHpRef.current = [...maxes];
       enemiesRef.current = enemyState;
@@ -544,6 +644,7 @@ export default function Battle() {
     setHand((prev) => {
       const result = refillHand(prev, aliveMembers(), drawOpts({ drawCount: count }));
       flashMerges(result.merges);
+      if (result.merges?.length) scheduleMergeTimer(() => setMergeFlash({}), 700);
       if (typeof result.supportDrawn === "number") {
         supportQuotaRef.current.drawn = result.supportDrawn;
       }
@@ -716,227 +817,259 @@ export default function Battle() {
   }
 
   async function doAttack() {
-    if (busy || phase !== "player") return;
+    if (busyRef.current || phase !== "player") {
+      autoFightLockRef.current = false;
+      return;
+    }
     const used = resolvePlayOrder(actionQueue, hand);
     // Solo spostamenti (o coda vuota): il turno deve comunque chiudersi se gli slot sono usati
     const maxSlots = aliveMembers().length;
     const slotsFull = maxSlots > 0 && actionQueue.length >= maxSlots;
-    if (used.length === 0 && !slotsFull && actionQueue.length === 0) return;
-    if (used.length === 0 && !slotsFull) return;
-
-    setBusy(true);
-    const ult2 = [...ultRef.current];
-    const mult = comboMultiplier(used.length, used);
-    let enemies2 = enemiesRef.current.map((e) => ({ ...e, status: e.status || emptyStatusBoard() }));
-    let lastHit = target;
-    const teamStatus = teamMembers.map((m) => m.status || emptyStatusBoard());
-
-    if (used.length === 0) {
-      pushLog("Solo spostamenti — turno passato");
+    if (used.length === 0 && !slotsFull && actionQueue.length === 0) {
+      autoFightLockRef.current = false;
+      return;
+    }
+    if (used.length === 0 && !slotsFull) {
+      autoFightLockRef.current = false;
+      return;
     }
 
-    for (const tile of used) {
-      const ci = tile.charIndex;
-      const stars = tile.stars || 1;
-      const member = teamMembers[ci];
-      if (!member || memberHpRef.current[ci] <= 0) continue;
-      if (hasCrowdControl(teamStatus[ci])) {
-        pushLog(`${member.character.char_name} è stordito e salta l'azione!`);
-        await sleep(350);
-        continue;
-      }
-      const move = member.character.moves[tile.moveIndex];
-      const isUlt = tile.moveIndex === 3;
-      const atkFx = attackModifierFromEffects(teamStatus[ci]);
+    busyRef.current = true;
+    setBusy(true);
+    let battleEnded = false;
 
-      if (move.type === "buff" || move.type === "heal") {
-        if (!isUlt && ult2[ci] < ULT_MAX) ult2[ci]++;
-        const fxMult = isUlt ? ultimateEffectMultiplier(member.owned?.ultimateLevel ?? 1) : 1;
-        const heal = Math.round(
-          move.power * healMultiplier(stars) * (move.type === "heal" ? 1 : 1.5) * fxMult
-        );
-        const hi = healTargetIndex(ci);
-        const supportTarget = hi >= 0 ? hi : ci;
-        await withAbilityMotion(
-          {
-            side: "ally",
-            index: ci,
-            kind: "support",
-            targetSide: "ally",
-            targetIndex: supportTarget,
-            nudgeX: lungeNudge(ci, supportTarget),
-          },
-          async () => {
-            if (hi >= 0) {
-              memberHpRef.current[hi] = Math.min(
-                memberMaxHpRef.current[hi],
-                memberHpRef.current[hi] + heal
-              );
-              syncMemberHp();
-              addFloater("team", hi, heal, true);
-            }
-            if (move.type === "buff") {
-              teamStatus[hi >= 0 ? hi : ci] = addEffect(
-                teamStatus[hi >= 0 ? hi : ci],
-                createEffect({ type: EFFECT_TYPES.BUFF_ATK, potency: stars, duration: 2, source: ci })
-              );
-            }
-            for (const fx of effectsFromMove(move, ci)) {
-              teamStatus[hi >= 0 ? hi : ci] = addEffect(teamStatus[hi >= 0 ? hi : ci], fx);
-            }
-            if (isUlt) ult2[ci] = 0;
-            pushLog(`${member.character.char_name} usa ${move.name} (${stars}★)! +${heal} HP`);
-            AudioManager.playHeal();
-          }
-        );
-      } else {
-        // ogni carta tiene il bersaglio scelto al momento della selezione
-        const preferred =
-          Number.isInteger(tile.targetIndex) && tile.targetIndex >= 0
-            ? tile.targetIndex
-            : lastHit;
-        const strikeTarget = aliveEnemyIndex(enemies2, preferred);
-        if (strikeTarget < 0) {
-          if (isUlt) ult2[ci] = 0;
+    try {
+      const ult2 = [...ultRef.current];
+      const mult = comboMultiplier(used.length, used);
+      let enemies2 = enemiesRef.current.map((e) => ({
+        ...e,
+        hp: Math.max(0, Number(e.hp) || 0),
+        status: e.status || emptyStatusBoard(),
+      }));
+      let lastHit = aliveEnemyIndex(enemies2, target);
+      if (lastHit < 0) lastHit = 0;
+      const teamStatus = teamMembers.map((m) => m.status || emptyStatusBoard());
+
+      if (used.length === 0) {
+        pushLog("Solo spostamenti — turno passato");
+      }
+
+      for (const tile of used) {
+        const ci = tile.charIndex;
+        const stars = tile.stars || 1;
+        const member = teamMembers[ci];
+        if (!member || memberHpRef.current[ci] <= 0) continue;
+        if (hasCrowdControl(teamStatus[ci])) {
+          pushLog(`${member.character.char_name} è stordito e salta l'azione!`);
+          await sleep(350);
           continue;
         }
-        await withAbilityMotion(
-          {
-            side: "ally",
-            index: ci,
-            kind: "strike",
-            targetSide: "enemy",
-            targetIndex: strikeTarget,
-            nudgeX: lungeNudge(ci, strikeTarget),
-          },
-          async () => {
-            const typeMult = damageTypeMultiplier(
-              member.character.attribute,
-              enemies2[strikeTarget].character
-            );
-            const ultLvMult = isUlt ? ultimateLevelMultiplier(member.owned?.ultimateLevel ?? 1) : 1;
-            const bonus = isUlt ? 1.5 : 1;
-            const raw = Math.round(
-              tileDamage(member.character, member.owned, move, stars) *
-                mult *
-                typeMult *
-                bonus *
-                atkFx *
-                ultLvMult *
-                (foodAtkMultRef.current || 1)
-            );
-            const def = effectiveDefense(enemies2[strikeTarget].character);
-            const defFx = defenseModifierFromEffects(enemies2[strikeTarget].status);
-            const dmg = mitigateDamage(raw, def, defFx);
-            enemies2[strikeTarget] = {
-              ...enemies2[strikeTarget],
-              hp: enemies2[strikeTarget].hp - dmg,
-            };
-            for (const fx of effectsFromMove(move, ci)) {
-              enemies2[strikeTarget] = {
-                ...enemies2[strikeTarget],
-                status: addEffect(enemies2[strikeTarget].status, fx),
-              };
+        const move = member.character?.moves?.[tile.moveIndex];
+        if (!move) continue;
+        const isUlt = tile.moveIndex === 3;
+        const atkFx = attackModifierFromEffects(teamStatus[ci]);
+
+        if (move.type === "buff" || move.type === "heal") {
+          if (!isUlt && ult2[ci] < ULT_MAX) ult2[ci]++;
+          const fxMult = isUlt ? ultimateEffectMultiplier(member.owned?.ultimateLevel ?? 1) : 1;
+          const heal = Math.round(
+            move.power * healMultiplier(stars) * (move.type === "heal" ? 1 : 1.5) * fxMult
+          );
+          const hi = healTargetIndex(ci);
+          const supportTarget = hi >= 0 ? hi : ci;
+          await withAbilityMotion(
+            {
+              side: "ally",
+              index: ci,
+              kind: "support",
+              targetSide: "ally",
+              targetIndex: supportTarget,
+              nudgeX: lungeNudge(ci, supportTarget),
+            },
+            async () => {
+              if (hi >= 0) {
+                memberHpRef.current[hi] = Math.min(
+                  memberMaxHpRef.current[hi],
+                  memberHpRef.current[hi] + heal
+                );
+                syncMemberHp();
+                addFloater("team", hi, heal, true);
+              }
+              if (move.type === "buff") {
+                teamStatus[hi >= 0 ? hi : ci] = addEffect(
+                  teamStatus[hi >= 0 ? hi : ci],
+                  createEffect({ type: EFFECT_TYPES.BUFF_ATK, potency: stars, duration: 2, source: ci })
+                );
+              }
+              for (const fx of effectsFromMove(move, ci)) {
+                teamStatus[hi >= 0 ? hi : ci] = addEffect(teamStatus[hi >= 0 ? hi : ci], fx);
+              }
+              if (isUlt) ult2[ci] = 0;
+              pushLog(`${member.character.char_name} usa ${move.name} (${stars}★)! +${heal} HP`);
+              AudioManager.playHeal();
             }
-            enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
-            const wasCrit = typeMult > 1 || isUlt || stars >= 3;
-            addFloater("enemy", strikeTarget, dmg, wasCrit);
-            AudioManager.playHit(wasCrit);
-            const starTag = stars > 1 ? ` ${stars}★` : "";
-            const tag = typeMult > 1 ? " SUPEREFFICACE!" : typeMult < 1 ? " non molto efficace" : "";
-            pushLog(
-              `${member.character.char_name}: ${isUlt ? "ULTIMA! " : ""}${move.name}${starTag} → ${dmg}${tag}`
-            );
-            if (isUlt) {
-              ult2[ci] = 0;
-              setUltCinematic({
-                id: `u_${Date.now()}`,
-                charName: member.character.char_name,
-                moveName: move.name,
-                dmg,
-              });
-              AudioManager.playUlt();
-            } else if (ult2[ci] < ULT_MAX) {
-              ult2[ci]++;
-            }
-          }
-        );
-        if (isUlt) {
-          await sleep(500);
-          setUltCinematic(null);
-        }
-        if (enemies2[strikeTarget].hp <= 0) {
-          pushLog(`${enemies2[strikeTarget].character.char_name} sconfitto!`);
-          lastHit = aliveEnemyIndex(enemies2, strikeTarget + 1);
+          );
         } else {
+          // Ritarget sempre su un nemico vivo (anche se la carta aveva un KO fissato)
+          const preferred =
+            Number.isInteger(tile.targetIndex) && tile.targetIndex >= 0
+              ? tile.targetIndex
+              : lastHit;
+          const strikeTarget = aliveEnemyIndex(enemies2, preferred);
+          if (strikeTarget < 0) {
+            if (isUlt) ult2[ci] = 0;
+            continue;
+          }
           lastHit = strikeTarget;
+          await withAbilityMotion(
+            {
+              side: "ally",
+              index: ci,
+              kind: "strike",
+              targetSide: "enemy",
+              targetIndex: strikeTarget,
+              nudgeX: lungeNudge(ci, strikeTarget),
+            },
+            async () => {
+              const foe = enemies2[strikeTarget];
+              if (!foe || Number(foe.hp) <= 0) return;
+              const typeMult = damageTypeMultiplier(member.character.attribute, foe.character);
+              const ultLvMult = isUlt ? ultimateLevelMultiplier(member.owned?.ultimateLevel ?? 1) : 1;
+              const bonus = isUlt ? 1.5 : 1;
+              const raw = Math.round(
+                tileDamage(member.character, member.owned, move, stars) *
+                  mult *
+                  typeMult *
+                  bonus *
+                  atkFx *
+                  ultLvMult *
+                  (foodAtkMultRef.current || 1) *
+                  (uniqueAtkMultRef.current || 1)
+              );
+              const def = effectiveDefense(foe.character);
+              const defFx = defenseModifierFromEffects(foe.status);
+              const dmg = mitigateDamage(raw, def, defFx);
+              enemies2[strikeTarget] = {
+                ...foe,
+                hp: Math.max(0, Number(foe.hp) - dmg),
+              };
+              for (const fx of effectsFromMove(move, ci)) {
+                enemies2[strikeTarget] = {
+                  ...enemies2[strikeTarget],
+                  status: addEffect(enemies2[strikeTarget].status, fx),
+                };
+              }
+              enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
+              const wasCrit = typeMult > 1 || isUlt || stars >= 3;
+              addFloater("enemy", strikeTarget, dmg, wasCrit);
+              AudioManager.playHit(wasCrit);
+              const starTag = stars > 1 ? ` ${stars}★` : "";
+              const tag = typeMult > 1 ? " SUPEREFFICACE!" : typeMult < 1 ? " non molto efficace" : "";
+              pushLog(
+                `${member.character.char_name}: ${isUlt ? "ULTIMA! " : ""}${move.name}${starTag} → ${dmg}${tag}`
+              );
+              if (isUlt) {
+                ult2[ci] = 0;
+                setUltCinematic({
+                  id: `u_${Date.now()}`,
+                  charName: member.character.char_name,
+                  moveName: move.name,
+                  dmg,
+                });
+                AudioManager.playUlt();
+              } else if (ult2[ci] < ULT_MAX) {
+                ult2[ci]++;
+              }
+            }
+          );
+          if (isUlt) {
+            await sleep(500);
+            setUltCinematic(null);
+          }
+          if (Number(enemies2[strikeTarget]?.hp) <= 0) {
+            pushLog(`${enemies2[strikeTarget].character.char_name} sconfitto!`);
+            lastHit = aliveEnemyIndex(enemies2, strikeTarget + 1);
+            if (lastHit >= 0) setTarget(lastHit);
+          } else {
+            lastHit = strikeTarget;
+          }
         }
       }
-    }
 
-    // salva status team (per fasi future)
-    setTeamMembers((tm) => tm.map((m, i) => ({ ...m, status: teamStatus[i] })));
+      // salva status team (per fasi future)
+      setTeamMembers((tm) => tm.map((m, i) => ({ ...m, status: teamStatus[i] })));
 
-    const usedIds = new Set(used.map((c) => c.id));
-    setActionQueue([]);
-    ultRef.current = ult2;
-    setUlt(ult2);
+      const usedIds = new Set(used.map((c) => c.id));
+      setActionQueue([]);
+      ultRef.current = ult2;
+      setUlt(ult2);
 
-    const alive = aliveMembers();
-    const maxH = maxHandSize(alive.length);
-    let remaining = hand.filter((c) => !usedIds.has(c.id));
-    for (let ci = 0; ci < ult2.length; ci++) {
-      if (
-        ult2[ci] >= ULT_MAX &&
-        teamMembers[ci]?.character?.moves?.[3] &&
-        memberHpRef.current[ci] > 0 &&
-        !remaining.some((t) => t.charIndex === ci && t.moveIndex === 3) &&
-        remaining.length < maxH
-      ) {
-        remaining.push(createBattleTile(ci, 3, 3));
+      const alive = aliveMembers();
+      const maxH = maxHandSize(alive.length);
+      let remaining = hand.filter((c) => !usedIds.has(c.id));
+      for (let ci = 0; ci < ult2.length; ci++) {
+        if (
+          ult2[ci] >= ULT_MAX &&
+          teamMembers[ci]?.character?.moves?.[3] &&
+          memberHpRef.current[ci] > 0 &&
+          !remaining.some((t) => t.charIndex === ci && t.moveIndex === 3) &&
+          remaining.length < maxH
+        ) {
+          remaining.push(createBattleTile(ci, 3, 3));
+        }
       }
-    }
-    // Fine turno giocatore → la pesca conta già sul turno successivo
-    const nextTurn = turn + 1;
-    syncSupportQuota(nextTurn);
-    commitHand(
-      refillHand(remaining, alive, drawOpts({ drawCount: drawCountForTeam(alive), turn: nextTurn }))
-    );
+      // Fine turno giocatore → la pesca conta già sul turno successivo
+      const nextTurn = turn + 1;
+      syncSupportQuota(nextTurn);
+      commitHand(
+        refillHand(remaining, alive, drawOpts({ drawCount: drawCountForTeam(alive), turn: nextTurn }))
+      );
 
-    // Scala buff cibo a durata turni
-    tickFoodBuffAfterPlayerTurn();
+      // Scala buff cibo a durata turni
+      tickFoodBuffAfterPlayerTurn();
 
-    if (enemies2.every((e) => e.hp <= 0)) {
-      await sleep(400);
-      recordBattleResult(true);
-      setPhase("win");
-      await grantRewards();
+      if (enemies2.every((e) => Number(e.hp) <= 0)) {
+        battleEnded = true;
+        await sleep(400);
+        recordBattleResult(true);
+        setPhase("win");
+        await grantRewards();
+        return;
+      }
+
+      selectAliveTarget(enemies2, lastHit);
+
+      await sleep(250);
+      await enemyTurn(enemies2);
+
+      if (memberHpRef.current.every((h) => h <= 0)) {
+        battleEnded = true;
+        return;
+      }
+
+      setTurn((t) => t + 1);
+      beginPlayerPlanning(null);
+    } catch (err) {
+      console.error("[battle] doAttack failed", err);
+      if (!battleEnded) {
+        selectAliveTarget(enemiesRef.current, target);
+        beginPlayerPlanning(null);
+      }
+    } finally {
+      autoFightLockRef.current = false;
+      busyRef.current = false;
+      setLunge(null);
+      setStruck(null);
       setBusy(false);
-      return;
     }
-
-    setTarget(Math.max(0, aliveEnemyIndex(enemies2, lastHit)));
-
-    await sleep(250);
-    await enemyTurn(enemies2);
-
-    if (memberHpRef.current.every((h) => h <= 0)) {
-      setBusy(false);
-      return;
-    }
-
-    setTurn((t) => t + 1);
-    beginPlayerPlanning(null);
-    autoFightLockRef.current = false;
-    setBusy(false);
   }
 
   /** Slot pieni (di solito 3 carte) → combatti automaticamente */
   useEffect(() => {
-    if (busy || phase !== "player") return;
+    if (busy || busyRef.current || phase !== "player") return undefined;
     const maxSlots = aliveMembers().length;
     if (maxSlots <= 0 || actionQueue.length < maxSlots) {
-      if (actionQueue.length < maxSlots) autoFightLockRef.current = false;
+      autoFightLockRef.current = false;
       return undefined;
     }
     if (autoFightLockRef.current) return undefined;
@@ -944,7 +1077,11 @@ export default function Battle() {
     const t = window.setTimeout(() => {
       void doAttack();
     }, 200);
-    return () => window.clearTimeout(t);
+    return () => {
+      window.clearTimeout(t);
+      // Se l'effetto si riparte prima del timeout, sblocca per riprovare
+      if (!busyRef.current) autoFightLockRef.current = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionQueue, busy, phase, memberHp, teamMembers]);
 
@@ -978,91 +1115,106 @@ export default function Battle() {
   }
 
   async function surrenderBattle() {
-    if (busy || phase === "win" || phase === "lose" || phase === "intro" || phase === "loading") return;
+    if (busy || busyRef.current || phase === "win" || phase === "lose" || phase === "intro" || phase === "loading") return;
     recordBattleResult(false);
     await endFoodBuffBattle();
     if (pvpMode) await settlePvp(false);
     setLunge(null);
     setStruck(null);
     setPhase("lose");
+    busyRef.current = false;
+    autoFightLockRef.current = false;
     setBusy(false);
   }
 
   async function fireUltimate(charIndex) {
-    if (busy || phase !== "player") return;
+    if (busyRef.current || busy || phase !== "player") return;
     if (memberHpRef.current[charIndex] <= 0) return;
     const charge = ultRef.current[charIndex] || 0;
     if (charge < ULT_MAX) return;
     const member = teamMembers[charIndex];
     const ultMove = member?.character?.moves?.[3];
     if (!ultMove) return;
+    busyRef.current = true;
     setBusy(true);
-    let enemies2 = enemiesRef.current.map((e) => ({ ...e }));
-    let tgt = aliveEnemyIndex(enemies2, target);
-    if (tgt < 0) { setBusy(false); return; }
-    let dealtDmg = 0;
-    await withAbilityMotion(
-      {
-        side: "ally",
-        index: charIndex,
-        kind: "strike",
-        targetSide: "enemy",
-        targetIndex: tgt,
-        nudgeX: lungeNudge(charIndex, tgt),
-      },
-      async () => {
-        const typeMult = damageTypeMultiplier(member.character.attribute, enemies2[tgt].character);
-        const rawUlt = battleUltimateDamage(
-          member.character,
-          member.owned,
-          ultMove,
-          3,
-          typeMult,
-          1.5
-        );
-        dealtDmg = mitigateDamage(
-          rawUlt,
-          effectiveDefense(enemies2[tgt].character),
-          defenseModifierFromEffects(enemies2[tgt].status)
-        );
-        enemies2[tgt] = { ...enemies2[tgt], hp: enemies2[tgt].hp - dealtDmg };
-        enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
-        addFloater("enemy", tgt, dealtDmg, true);
-        AudioManager.playUlt();
-        const ultLv = member.owned?.ultimateLevel ?? 1;
-        pushLog(`${member.character.char_name}: ULTIMA! ${ultMove.name} (Lv.${ultLv}) → ${dealtDmg}`);
-        setUltCinematic({
-          id: `u_${Date.now()}`,
-          charName: member.character.char_name,
-          moveName: ultMove.name,
-          dmg: dealtDmg,
-        });
+    try {
+      let enemies2 = enemiesRef.current.map((e) => ({
+        ...e,
+        hp: Math.max(0, Number(e.hp) || 0),
+      }));
+      let tgt = aliveEnemyIndex(enemies2, target);
+      if (tgt < 0) return;
+      let dealtDmg = 0;
+      await withAbilityMotion(
+        {
+          side: "ally",
+          index: charIndex,
+          kind: "strike",
+          targetSide: "enemy",
+          targetIndex: tgt,
+          nudgeX: lungeNudge(charIndex, tgt),
+        },
+        async () => {
+          const foe = enemies2[tgt];
+          if (!foe || Number(foe.hp) <= 0) return;
+          const typeMult = damageTypeMultiplier(member.character.attribute, foe.character);
+          const rawUlt = battleUltimateDamage(
+            member.character,
+            member.owned,
+            ultMove,
+            3,
+            typeMult,
+            1.5
+          );
+          dealtDmg = mitigateDamage(
+            rawUlt,
+            effectiveDefense(foe.character),
+            defenseModifierFromEffects(foe.status)
+          );
+          enemies2[tgt] = { ...foe, hp: Math.max(0, Number(foe.hp) - dealtDmg) };
+          enemies2 = syncEnemies(enemies2, setEnemies, enemiesRef);
+          addFloater("enemy", tgt, dealtDmg, true);
+          AudioManager.playUlt();
+          const ultLv = member.owned?.ultimateLevel ?? 1;
+          pushLog(`${member.character.char_name}: ULTIMA! ${ultMove.name} (Lv.${ultLv}) → ${dealtDmg}`);
+          setUltCinematic({
+            id: `u_${Date.now()}`,
+            charName: member.character.char_name,
+            moveName: ultMove.name,
+            dmg: dealtDmg,
+          });
+        }
+      );
+      void import("@/lib/dailies")
+        .then(({ bumpDaily }) => {
+          const uid = playerState?.created_by_id || playerState?.id;
+          if (uid) bumpDaily(uid, "use_ulti");
+        })
+        .catch(() => {});
+      const ult3 = [...ultRef.current];
+      ult3[charIndex] = 0;
+      ultRef.current = ult3;
+      setUlt(ult3);
+      await sleep(700);
+      setUltCinematic(null);
+      if (enemies2.every((e) => Number(e.hp) <= 0)) {
+        recordBattleResult(true);
+        setPhase("win");
+        await grantRewards();
+        return;
       }
-    );
-    void import("@/lib/dailies")
-      .then(({ bumpDaily }) => {
-        const uid = playerState?.created_by_id || playerState?.id;
-        if (uid) bumpDaily(uid, "use_ulti");
-      })
-      .catch(() => {});
-    const ult3 = [...ultRef.current];
-    ult3[charIndex] = 0;
-    ultRef.current = ult3;
-    setUlt(ult3);
-    await sleep(700);
-    setUltCinematic(null);
-    if (enemies2.every((e) => e.hp <= 0)) {
-      recordBattleResult(true);
-      setPhase("win");
-      await grantRewards();
+      if (Number(enemies2[tgt]?.hp) <= 0) {
+        pushLog(`${enemies2[tgt].character.char_name} sconfitto!`);
+      }
+      selectAliveTarget(enemies2, tgt);
+    } catch (err) {
+      console.error("[battle] fireUltimate failed", err);
+    } finally {
+      busyRef.current = false;
+      setLunge(null);
+      setStruck(null);
       setBusy(false);
-      return;
     }
-    if (enemies2[tgt].hp <= 0) {
-      pushLog(`${enemies2[tgt].character.char_name} sconfitto!`);
-    }
-    setTarget(Math.max(0, aliveEnemyIndex(enemies2, tgt)));
-    setBusy(false);
   }
 
   async function enemyTurn(currentEnemies) {
@@ -1078,7 +1230,7 @@ export default function Battle() {
 
     for (let ei = 0; ei < enemies2.length; ei++) {
       const enemy = enemies2[ei];
-      if (enemy.hp <= 0) continue;
+      if (Number(enemy.hp) <= 0) continue;
       if (hasCrowdControl(enemy.status)) {
         pushLog(`${enemy.character.char_name} è stordito e salta il turno!`);
         await sleep(350);
@@ -1167,7 +1319,9 @@ export default function Battle() {
           const raw = Math.round(
             enemyDamage(enemy.character, move) * typeMult * enemyAtkMult * atkFxEnemy
           );
-          const def = effectiveDefense(defender.character, defender.owned);
+          const def =
+            effectiveDefense(defender.character, defender.owned) *
+            (uniqueDefMultRef.current || 1);
           const defFx = defenseModifierFromEffects(teamStatus[defIdx]);
           const dmg = mitigateDamage(raw, def, defFx);
           memberHpRef.current[defIdx] = Math.max(0, memberHpRef.current[defIdx] - dmg);
@@ -1642,81 +1796,89 @@ export default function Battle() {
 
                   return (
                     <div
-                      ref={provided.innerRef}
-                      {...provided.droppableProps}
                       className={cn(
-                        "hand-rail",
-                        snapshot.isDraggingOver && "hand-rail--dragging"
+                        "hand-rail-wrap",
+                        (snapshot.isDraggingOver || handDragging) && "hand-rail-wrap--dragging"
                       )}
                     >
-                      {tiles.map(({ tile, member, move }, idx) => {
-                        const isUltCard = tile.moveIndex === 3;
-                        const stars = tile.stars || 1;
-                        const tgtEnemy = enemies[target];
-                        const adv =
-                          move.type === "attack" && tgtEnemy && tgtEnemy.hp > 0
-                            ? advantageMultiplier(member.character.attribute, tgtEnemy.character.attribute)
-                            : 1;
-                        const fanRot = 0;
-                        const fanY = 0;
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={cn(
+                          "hand-rail",
+                          snapshot.isDraggingOver && "hand-rail--dragging"
+                        )}
+                      >
+                        {tiles.map(({ tile, member, move }, idx) => {
+                          const isUltCard = tile.moveIndex === 3;
+                          const stars = tile.stars || 1;
+                          const tgtEnemy = enemies[target];
+                          const adv =
+                            move.type === "attack" && tgtEnemy && tgtEnemy.hp > 0
+                              ? advantageMultiplier(member.character.attribute, tgtEnemy.character.attribute)
+                              : 1;
+                          const fanRot = 0;
+                          const fanY = 0;
 
-                        return (
-                          <Draggable
-                            key={tile.id}
-                            draggableId={tile.id}
-                            index={idx}
-                            isDragDisabled={busy}
-                          >
-                            {(dragProvided, dragSnapshot) => (
-                              <div
-                                ref={dragProvided.innerRef}
-                                {...dragProvided.draggableProps}
-                                {...dragProvided.dragHandleProps}
-                                className={cn(
-                                  "hand-card-fan",
-                                  idx > 0 && "hand-card-fan--overlap",
-                                  dragSnapshot.isDragging && "skill-card--dragging"
-                                )}
-                                style={{
-                                  ...dragProvided.draggableProps.style,
-                                  zIndex: dragSnapshot.isDragging ? 999 : idx + 1,
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.zIndex = "999";
-                                }}
-                                onMouseLeave={(e) => {
-                                  if (dragSnapshot.isDragging) return;
-                                  e.currentTarget.style.zIndex = String(idx + 1);
-                                }}
-                                onClick={() => {
-                                  if (dragSnapshot.isDragging || didDragRef.current) return;
-                                  playCardFromHand(tile.id);
-                                }}
-                              >
+                          return (
+                            <Draggable
+                              key={tile.id}
+                              draggableId={tile.id}
+                              index={idx}
+                              isDragDisabled={busy}
+                            >
+                              {(dragProvided, dragSnapshot) => (
                                 <div
-                                  className="hand-card-fan__tilt"
+                                  ref={dragProvided.innerRef}
+                                  {...dragProvided.draggableProps}
+                                  {...dragProvided.dragHandleProps}
+                                  className={cn(
+                                    "hand-card-fan",
+                                    idx > 0 && "hand-card-fan--overlap",
+                                    dragSnapshot.isDragging && "skill-card--dragging"
+                                  )}
                                   style={{
-                                    transform: dragSnapshot.isDragging
-                                      ? undefined
-                                      : `rotate(${fanRot}deg) translateY(${fanY}px)`,
+                                    ...dragProvided.draggableProps.style,
+                                    zIndex: dragSnapshot.isDragging ? 999 : idx + 1,
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.zIndex = "999";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (dragSnapshot.isDragging) return;
+                                    e.currentTarget.style.zIndex = String(idx + 1);
+                                  }}
+                                  onClick={() => {
+                                    if (dragSnapshot.isDragging || didDragRef.current) return;
+                                    playCardFromHand(tile.id);
                                   }}
                                 >
-                                  <SkillCard
-                                    member={member}
-                                    move={move}
-                                    stars={stars}
-                                    isUlt={isUltCard}
-                                    advantage={adv}
-                                    merging={mergeFlash.includes(tile.id)}
-                                    className="pointer-events-none"
-                                  />
+                                  <div
+                                    className="hand-card-fan__tilt"
+                                    style={{
+                                      transform: dragSnapshot.isDragging
+                                        ? undefined
+                                        : `rotate(${fanRot}deg) translateY(${fanY}px)`,
+                                    }}
+                                  >
+                                    <SkillCard
+                                      member={member}
+                                      move={move}
+                                      stars={stars}
+                                      isUlt={isUltCard}
+                                      advantage={adv}
+                                      merging={Boolean(mergeFlash[tile.id])}
+                                      mergeRole={mergeFlash[tile.id] || null}
+                                      className="pointer-events-none"
+                                    />
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                          </Draggable>
-                        );
-                      })}
-                      {provided.placeholder}
+                              )}
+                            </Draggable>
+                          );
+                        })}
+                        {provided.placeholder}
+                      </div>
                     </div>
                   );
                 }}
@@ -1727,8 +1889,10 @@ export default function Battle() {
           if (planning) {
             return (
               <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
-                {battlefield}
-                {handPanel}
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  {battlefield}
+                  {handPanel}
+                </div>
               </DragDropContext>
             );
           }

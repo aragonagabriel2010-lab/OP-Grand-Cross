@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AMBER } from "@/lib/arcade";
 import { starLabel } from "@/lib/battleHand";
 
-/** Banner fusione stelle */
+/** Banner fusione stelle + silhouette carte che si uniscono */
 export function MergeBanner({ event }) {
   return (
     <AnimatePresence>
@@ -12,8 +12,32 @@ export function MergeBanner({ event }) {
           initial={{ opacity: 0, scale: 0.7, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 1.1, y: -10 }}
-          className="pointer-events-none absolute inset-x-0 top-[28%] z-[35] flex justify-center px-4"
+          className="pointer-events-none absolute inset-x-0 top-[26%] z-[35] flex flex-col items-center justify-center gap-3 px-4"
         >
+          {event.union && (
+            <div className="relative flex h-14 w-36 items-center justify-center">
+              <motion.span
+                className="merge-union-card merge-union-card--left"
+                initial={{ x: -28, opacity: 0.9, rotate: -12 }}
+                animate={{ x: 10, opacity: 0.2, rotate: 0, scale: 0.75 }}
+                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              />
+              <motion.span
+                className="merge-union-card merge-union-card--right"
+                initial={{ x: 28, opacity: 0.9, rotate: 12 }}
+                animate={{ x: -10, opacity: 0.2, rotate: 0, scale: 0.75 }}
+                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              />
+              <motion.span
+                className="merge-union-burst"
+                initial={{ scale: 0.2, opacity: 0 }}
+                animate={{ scale: [0.2, 1.35, 1], opacity: [0, 1, 0.85] }}
+                transition={{ duration: 0.55, delay: 0.18 }}
+              >
+                ★
+              </motion.span>
+            </div>
+          )}
           <div
             className={`rounded-2xl border-[3px] border-black px-6 py-3 text-center shadow-[0_4px_0_0_#000] ${AMBER}`}
           >

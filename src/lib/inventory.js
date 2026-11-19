@@ -8,7 +8,8 @@
 
 export const INVENTORY_SECTIONS = [
   { id: "materials", label: "Materiali", hint: "Risveglio e crafting" },
-  { id: "items", label: "Oggetti", hint: "Gear e pezzi speciali" },
+  { id: "equipment", label: "Equip", hint: "Collane, anelli, bracciali…" },
+  { id: "items", label: "Oggetti", hint: "Pezzi speciali e scarti" },
   { id: "usables", label: "Utilizzabili", hint: "Cibo e consumabili" },
   { id: "ingredients", label: "Ingredienti", hint: "Per la Cucina" },
 ];

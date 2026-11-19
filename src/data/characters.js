@@ -1,10 +1,12 @@
 /** Catalogo personaggi (hero + enemy). ID stabili usati dai capitoli e dal save. */
 
+import { enrichCharacters } from "@/data/characterExtras";
+
 const atk = (name, power, description = "") => ({ name, power, type: "attack", description });
 const buff = (name, power, description = "") => ({ name, power, type: "buff", description });
 const heal = (name, power, description = "") => ({ name, power, type: "heal", description });
 
-export const CHARACTERS = [
+const RAW_CHARACTERS = [
   // ——— Heroes (gacha / playable) ———
   {
     id: "char-luffy-alvida",
@@ -564,6 +566,8 @@ export const CHARACTERS = [
     moves: [atk("Colpo a pagamento", 24), atk("Fuga tattica", 18)],
   },
 ];
+
+export const CHARACTERS = enrichCharacters(RAW_CHARACTERS);
 
 export const CHARACTER_MAP = Object.fromEntries(CHARACTERS.map((c) => [c.id, c]));
 

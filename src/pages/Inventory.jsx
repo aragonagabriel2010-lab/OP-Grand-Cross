@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "@/lib/localDb";
 import { useGame } from "@/hooks/useGame";
@@ -17,17 +17,29 @@ import {
   normalizeFoodBuff,
   eatUsable,
 } from "@/lib/inventory";
-import { Hexagon, Backpack, Package, Pill, Carrot } from "lucide-react";
+import {
+  EQUIP_SLOTS,
+  ensureStarterGear,
+  normalizeGearList,
+  uniqueStatLabel,
+  computeUniqueValue,
+} from "@/lib/equipment";
+import { EquipSlotIcon } from "@/components/game/EquipSlotIcons";
+import { RARITY_COLORS } from "@/lib/gameUtils";
+import { Hexagon, Backpack, Package, Pill, Carrot, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AudioManager } from "@/lib/AudioManager";
 import { toast } from "@/components/ui/use-toast";
 
 const SECTION_ICON = {
   materials: Hexagon,
+  equipment: Shield,
   items: Package,
   usables: Pill,
   ingredients: Carrot,
 };
+
+const SLOT_LABEL = Object.fromEntries(EQUIP_SLOTS.map((s) => [s.id, s.label]));
 
 function ItemRow({ name, hint, color, qty, Icon = Hexagon, delay = 0, actionLabel, onAction, actionDisabled }) {
   return (
@@ -76,6 +88,50 @@ function ItemRow({ name, hint, color, qty, Icon = Hexagon, delay = 0, actionLabe
   );
 }
 
+function GearRow({ item, wearerName, delay = 0 }) {
+  const rarityColor = RARITY_COLORS[item.rarity] || RARITY_COLORS.R;
+  const uniqueVal = computeUniqueValue(item);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay, type: "spring", stiffness: 340, damping: 26 }}
+      className={`flex items-center gap-3 rounded-2xl ${TEAL} ${PANEL} p-3.5`}
+    >
+      <div
+        className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-black bg-[#0b161b]"
+        style={{ boxShadow: `0 0 12px ${rarityColor}55` }}
+      >
+        <span style={{ color: rarityColor }} className="flex">
+          <EquipSlotIcon slotId={item.slot} className="h-7 w-7" />
+        </span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-bold uppercase tracking-wide text-white">{item.name}</p>
+          <span
+            className="shrink-0 rounded border border-black px-1.5 py-0.5 text-[8px] font-black uppercase text-black"
+            style={{ background: rarityColor }}
+          >
+            {item.rarity}
+          </span>
+        </div>
+        <p className="text-[10px] uppercase tracking-wide text-white/50">
+          {SLOT_LABEL[item.slot] || item.slot} · Lv.{item.level}
+        </p>
+        <p className="mt-0.5 text-[10px] uppercase tracking-wide" style={{ color: rarityColor }}>
+          {uniqueStatLabel(item)} +{uniqueVal}
+        </p>
+        {wearerName ? (
+          <p className="mt-1 text-[9px] font-bold uppercase text-[#f5a623]">Su {wearerName}</p>
+        ) : (
+          <p className="mt-1 text-[9px] uppercase text-white/40">In inventario</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 function EmptyHint({ text }) {
   return (
     <motion.p
@@ -89,7 +145,7 @@ function EmptyHint({ text }) {
 }
 
 export default function Inventory() {
-  const { loading, playerState, refresh } = useGame();
+  const { loading, playerState, refresh, patchPlayerState, owned, charMap } = useGame();
   const [section, setSection] = useState("materials");
   const [busy, setBusy] = useState(false);
 
@@ -98,6 +154,25 @@ export default function Inventory() {
     const uid = playerState.created_by_id || playerState.id;
     import("@/lib/dailies").then(({ bumpDaily }) => bumpDaily(uid, "open_inventory")).catch(() => {});
   }, [playerState]);
+
+  useEffect(() => {
+    if (!playerState) return;
+    const ensured = ensureStarterGear(playerState.gear);
+    if (!ensured.seeded) return;
+    patchPlayerState?.({ gear: ensured.gear });
+    db.entities.PlayerState.update(playerState.id, { gear: ensured.gear }).then(() => refresh?.());
+  }, [playerState, patchPlayerState, refresh]);
+
+  const gearList = useMemo(() => normalizeGearList(playerState?.gear), [playerState?.gear]);
+
+  const ownedNameById = useMemo(() => {
+    const map = {};
+    (owned || []).forEach((o) => {
+      const c = charMap?.[o.character_id];
+      if (c) map[o.id] = c.char_name;
+    });
+    return map;
+  }, [owned, charMap]);
 
   if (loading || !playerState) {
     return (
@@ -142,6 +217,18 @@ export default function Inventory() {
         delay={i * 0.04}
       />
     ));
+  } else if (section === "equipment") {
+    rows =
+      gearList.length === 0
+        ? [<EmptyHint key="e" text="Nessun equipaggiamento · equipaggia dai personaggi" />]
+        : gearList.map((g, i) => (
+            <GearRow
+              key={g.id}
+              item={g}
+              wearerName={g.equippedTo ? ownedNameById[g.equippedTo] : null}
+              delay={i * 0.04}
+            />
+          ));
   } else if (section === "ingredients") {
     rows = Object.values(INGREDIENT_DEFS).map((m, i) => (
       <ItemRow
@@ -172,11 +259,11 @@ export default function Inventory() {
           ));
   } else if (section === "usables") {
     const list = Object.values(USABLE_DEFS);
-    const owned = list.filter((m) => (usables[m.id] || 0) > 0);
+    const ownedUsables = list.filter((m) => (usables[m.id] || 0) > 0);
     rows =
-      owned.length === 0
+      ownedUsables.length === 0
         ? [<EmptyHint key="e" text="Nessun utilizzabile · cucina qualcosa!" />]
-        : owned.map((m, i) => (
+        : ownedUsables.map((m, i) => (
             <ItemRow
               key={m.id}
               name={m.name}
@@ -212,7 +299,7 @@ export default function Inventory() {
           </p>
         )}
 
-        <div className="mb-4 grid grid-cols-4 gap-1.5">
+        <div className="mb-4 grid grid-cols-5 gap-1">
           {INVENTORY_SECTIONS.map((s) => {
             const Icon = SECTION_ICON[s.id] || Package;
             const on = section === s.id;
@@ -222,12 +309,12 @@ export default function Inventory() {
                 type="button"
                 onClick={() => setSection(s.id)}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-xl border-2 border-black px-1 py-2 shadow-[0_2px_0_0_#000] transition-transform active:translate-y-0.5",
+                  "flex flex-col items-center gap-1 rounded-xl border-2 border-black px-0.5 py-2 shadow-[0_2px_0_0_#000] transition-transform active:translate-y-0.5",
                   on ? "bg-[#f5a623] text-black" : `${TEAL} text-white/70`
                 )}
               >
-                <Icon size={14} className={on ? "text-black" : "text-[#f5a623]"} />
-                <span className="text-[7px] font-bold uppercase leading-tight">{s.label}</span>
+                <Icon size={13} className={on ? "text-black" : "text-[#f5a623]"} />
+                <span className="text-[6.5px] font-bold uppercase leading-tight">{s.label}</span>
               </button>
             );
           })}
