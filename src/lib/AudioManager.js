@@ -1,26 +1,69 @@
 import { effectiveVolume, loadAudioSettings } from "@/lib/audioSettings";
 
+/** Temino avventura — 8 beat @ ~96 BPM (procedurale, niente asset). */
+const BGM_BPM = 96;
+const BGM_BEAT = 60 / BGM_BPM;
+const BGM_LOOP_BEATS = 8;
+/** [beat, durataBeat, Hz] */
+const BGM_MELODY = [
+  [0, 1, 392.0],
+  [1, 1, 440.0],
+  [2, 1.5, 523.25],
+  [3.5, 0.5, 493.88],
+  [4, 1, 440.0],
+  [5, 1, 349.23],
+  [6, 2, 329.63],
+];
+const BGM_BASS = [
+  [0, 2, 130.81],
+  [2, 2, 146.83],
+  [4, 2, 164.81],
+  [6, 2, 123.47],
+];
+
 /**
- * AudioManager — SFX UI sempre attivi secondo le Impostazioni
- * (mute / master / sfx). Nessun flusso di "sblocco" manuale.
+ * AudioManager — SFX UI + BGM loop secondo le Impostazioni
+ * (mute / master / sfx / bgm). Nessun flusso di "sblocco" manuale.
  */
 class AudioManagerClass {
   constructor() {
     this.ctx = null;
     this.master = null;
+    this.bgmBus = null;
     this._lastHoverAt = 0;
     this._lastHoverEl = null;
     this._hoverMutedUntil = 0;
     this._lastPointerMoveAt = 0;
     this._booted = false;
+    this._bgmWanted = true;
+    this._bgmPlaying = false;
+    this._bgmStarting = false;
+    this._bgmGen = 0;
+    this._bgmNextLoopAt = 0;
+    this._bgmTimer = null;
 
     if (typeof window !== "undefined") {
-      window.addEventListener("opgv:audio", () => this.applySettingsVolume());
-      // Avvio immediato (best-effort)
+      window.addEventListener("opgv:audio", () => {
+        this.applySettingsVolume();
+        if (this._bgmWanted && document.visibilityState === "visible") {
+          this.startBgm();
+        }
+      });
       queueMicrotask(() => this.boot());
-      window.addEventListener("pageshow", () => this.boot());
+      window.addEventListener("pageshow", () => {
+        this.boot();
+        if (this._bgmWanted && document.visibilityState === "visible") {
+          this.startBgm();
+        }
+      });
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") this.boot();
+        if (document.visibilityState === "hidden") {
+          // Ferma timer + note già in coda (evita stack al rientro)
+          this._hardStopBgm();
+          return;
+        }
+        this.boot();
+        if (this._bgmWanted) this.startBgm();
       });
     }
   }
@@ -51,15 +94,34 @@ class AudioManagerClass {
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.connect(this.ctx.destination);
+      this.bgmBus = this.ctx.createGain();
+      this.bgmBus.connect(this.ctx.destination);
       this.applySettingsVolume();
     }
     return this.ctx;
   }
 
   applySettingsVolume() {
-    if (!this.master) return;
-    // Canale SFX × master × mute dalle Impostazioni
-    this.master.gain.value = effectiveVolume("sfx");
+    if (this.master) {
+      this.master.gain.value = effectiveVolume("sfx");
+    }
+    if (!this.bgmBus) return;
+    const vol = effectiveVolume("bgm");
+    const t = this.ctx?.currentTime || 0;
+    this.bgmBus.gain.setTargetAtTime(vol * 0.22, t, 0.05);
+    if (vol < 0.001) {
+      this._hardStopBgm();
+      return;
+    }
+    if (
+      this._bgmWanted &&
+      !this._bgmPlaying &&
+      !this._bgmStarting &&
+      document.visibilityState === "visible" &&
+      this.ctx?.state === "running"
+    ) {
+      this.startBgm();
+    }
   }
 
   _sfxEnabled() {
@@ -374,6 +436,172 @@ class AudioManagerClass {
   /** Potenziamento ultimata */
   playUltUpgrade() {
     this.playUlt();
+  }
+
+  /** Avvia (o riprende) la musichetta hub — richiede gesture utente per AudioContext. */
+  startBgm() {
+    this._bgmWanted = true;
+    if (document.visibilityState === "hidden") return;
+    if (this._bgmPlaying || this._bgmStarting) return;
+
+    const ctx = this._ensureCtx();
+    if (!ctx || !this.bgmBus) return;
+    if (effectiveVolume("bgm") < 0.001) {
+      this._hardStopBgm();
+      return;
+    }
+
+    this._bgmStarting = true;
+    const begin = () => {
+      this._bgmStarting = false;
+      if (!this._bgmWanted || document.visibilityState === "hidden") return;
+      if (this._bgmPlaying) return;
+      if (!this.ctx || this.ctx.state !== "running" || !this.bgmBus) return;
+      if (effectiveVolume("bgm") < 0.001) return;
+
+      this.bgmBus.gain.setTargetAtTime(
+        effectiveVolume("bgm") * 0.22,
+        this.ctx.currentTime,
+        0.05
+      );
+      this._bgmPlaying = true;
+      this._bgmGen += 1;
+      const gen = this._bgmGen;
+      this._bgmNextLoopAt = this.ctx.currentTime + 0.05;
+      this._scheduleBgmLoops(gen);
+    };
+
+    if (ctx.state === "suspended") {
+      ctx.resume().then(begin).catch(() => {
+        this._bgmStarting = false;
+      });
+      return;
+    }
+    begin();
+  }
+
+  stopBgm() {
+    this._bgmWanted = false;
+    this._hardStopBgm();
+  }
+
+  /** Ferma scheduler e silenzia note già schedulate (ricrea il bus BGM). */
+  _hardStopBgm() {
+    this._bgmPlaying = false;
+    this._bgmStarting = false;
+    this._bgmGen += 1;
+    if (this._bgmTimer != null) {
+      clearTimeout(this._bgmTimer);
+      this._bgmTimer = null;
+    }
+    if (!this.ctx) return;
+    if (this.bgmBus) {
+      try {
+        this.bgmBus.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.bgmBus = this.ctx.createGain();
+    this.bgmBus.gain.value = effectiveVolume("bgm") * 0.22;
+    this.bgmBus.connect(this.ctx.destination);
+  }
+
+  _scheduleBgmLoops(gen) {
+    if (gen !== this._bgmGen) return;
+    if (!this._bgmPlaying || !this.ctx || !this.bgmBus) return;
+    if (effectiveVolume("bgm") < 0.001 || document.visibilityState === "hidden") {
+      this._hardStopBgm();
+      return;
+    }
+
+    const ctx = this.ctx;
+    const loopDur = BGM_LOOP_BEATS * BGM_BEAT;
+    let guard = 0;
+    while (this._bgmNextLoopAt < ctx.currentTime + loopDur * 1.25 && guard < 4) {
+      if (gen !== this._bgmGen) return;
+      this._queueBgmLoop(this._bgmNextLoopAt);
+      this._bgmNextLoopAt += loopDur;
+      guard += 1;
+    }
+
+    if (this._bgmTimer != null) {
+      clearTimeout(this._bgmTimer);
+      this._bgmTimer = null;
+    }
+    const waitMs = Math.max(80, (this._bgmNextLoopAt - ctx.currentTime - loopDur * 0.4) * 1000);
+    this._bgmTimer = setTimeout(() => {
+      this._bgmTimer = null;
+      if (gen !== this._bgmGen) return;
+      this._scheduleBgmLoops(gen);
+    }, waitMs);
+  }
+
+  _queueBgmLoop(t0) {
+    const ctx = this.ctx;
+    const bus = this.bgmBus;
+    if (!ctx || !bus) return;
+
+    for (const [beat, durBeats, freq] of BGM_BASS) {
+      const start = t0 + beat * BGM_BEAT;
+      const dur = durBeats * BGM_BEAT;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, start);
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(0.55, start + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur * 0.92);
+      osc.connect(g);
+      g.connect(bus);
+      osc.start(start);
+      osc.stop(start + dur);
+    }
+
+    for (const [beat, durBeats, freq] of BGM_MELODY) {
+      const start = t0 + beat * BGM_BEAT;
+      const dur = durBeats * BGM_BEAT;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, start);
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(0.7, start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + Math.max(0.08, dur * 0.85));
+      osc.connect(g);
+      g.connect(bus);
+      osc.start(start);
+      osc.stop(start + dur);
+
+      // Armonica leggera
+      const harm = ctx.createOscillator();
+      const hg = ctx.createGain();
+      harm.type = "sine";
+      harm.frequency.setValueAtTime(freq * 2, start);
+      hg.gain.setValueAtTime(0.0001, start);
+      hg.gain.exponentialRampToValueAtTime(0.18, start + 0.03);
+      hg.gain.exponentialRampToValueAtTime(0.0001, start + Math.max(0.06, dur * 0.7));
+      harm.connect(hg);
+      hg.connect(bus);
+      harm.start(start);
+      harm.stop(start + dur);
+    }
+
+    // Pulse ritmico soft sui beat pari
+    for (let b = 0; b < BGM_LOOP_BEATS; b += 2) {
+      const start = t0 + b * BGM_BEAT;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(b % 4 === 0 ? 180 : 220, start);
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(0.12, start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.08);
+      osc.connect(g);
+      g.connect(bus);
+      osc.start(start);
+      osc.stop(start + 0.1);
+    }
   }
 
   getSettings() {

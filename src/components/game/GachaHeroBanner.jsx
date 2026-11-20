@@ -1,10 +1,7 @@
 import { motion } from "framer-motion";
 import { HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-function asset(path) {
-  return `${import.meta.env.BASE_URL}${String(path).replace(/^\//, "")}`;
-}
+import { assetUrl as asset } from "@/lib/assets";
 
 /**
  * Banner Gacha “Rotta Verso Il Grand Line” — testo in basso a destra + sheen.

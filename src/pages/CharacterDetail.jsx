@@ -426,20 +426,11 @@ export default function CharacterDetail() {
                 if (!equipMode) setImageZoomed(true);
               }}
             >
-              {character.image_url ? (
-                <img
-                  src={character.image_url}
-                  alt={character.char_name}
-                  className={cn("char-hero__art", isLocked && "brightness-75")}
-                  draggable={false}
-                />
-              ) : (
-                <CharacterArt
-                  character={character}
-                  variant="poster"
-                  className={cn("char-hero__art", isLocked && "brightness-75")}
-                />
-              )}
+              <CharacterArt
+                character={character}
+                variant="poster"
+                className={cn("char-hero__art", isLocked && "brightness-75")}
+              />
             </button>
 
             <div className="char-hero__shade" aria-hidden="true" />
@@ -786,11 +777,7 @@ export default function CharacterDetail() {
               exit={{ scale: 0.96, opacity: 0 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
-              {character.image_url ? (
-                <img src={character.image_url} alt={character.char_name} className="char-zoom__art" draggable={false} />
-              ) : (
-                <CharacterArt character={character} variant="poster" className="char-zoom__art" />
-              )}
+              <CharacterArt character={character} variant="poster" className="char-zoom__art" />
             </motion.div>
             <span className="char-zoom__hint">Tocca per chiudere</span>
           </motion.div>

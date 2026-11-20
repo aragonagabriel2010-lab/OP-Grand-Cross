@@ -26,11 +26,23 @@ function isInteractive(el) {
 }
 
 /**
- * SFX UI globali. Volume/mute solo dalle Impostazioni.
+ * SFX UI + avvio BGM al primo gesto. Volume/mute dalle Impostazioni.
  */
 export default function UiSfxBridge() {
   useEffect(() => {
     AudioManager.boot();
+
+    let unlocked = false;
+    const unlockAudio = () => {
+      AudioManager.boot();
+      if (!unlocked) {
+        unlocked = true;
+        AudioManager.startBgm();
+      } else if (document.visibilityState === "visible") {
+        // Idempotente: non stacka se già in play
+        AudioManager.startBgm();
+      }
+    };
 
     const markMove = () => AudioManager.notePointerMove();
 
@@ -44,17 +56,22 @@ export default function UiSfxBridge() {
     };
 
     const onClick = (e) => {
+      unlockAudio();
       const target = isInteractive(e.target);
       if (!target) return;
       AudioManager.muteHover(400);
       AudioManager.playClick();
     };
 
+    document.addEventListener("pointerdown", unlockAudio, { capture: true, passive: true });
+    document.addEventListener("keydown", unlockAudio, { capture: true });
     document.addEventListener("pointermove", markMove, { capture: true, passive: true });
     document.addEventListener("pointerover", onOver, true);
     document.addEventListener("click", onClick, true);
 
     return () => {
+      document.removeEventListener("pointerdown", unlockAudio, true);
+      document.removeEventListener("keydown", unlockAudio, true);
       document.removeEventListener("pointermove", markMove, true);
       document.removeEventListener("pointerover", onOver, true);
       document.removeEventListener("click", onClick, true);

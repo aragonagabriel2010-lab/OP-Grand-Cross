@@ -109,6 +109,7 @@ export async function addCharacter(characterId) {
       ultimateLevel: cur.ultimateLevel,
       ultimateTokens: cur.ultimateTokens + 1,
     });
+    if (!updated?.id) throw new Error("Aggiornamento doppione fallito");
     return {
       owned: normalizeUltimateFields(updated),
       isDuplicate: true,
@@ -125,6 +126,9 @@ export async function addCharacter(characterId) {
     ultimateLevel: ULTIMATE_MIN_LEVEL,
     ultimateTokens: 0,
   });
+  if (!created?.id || created.character_id !== characterId) {
+    throw new Error("Creazione personaggio fallita");
+  }
   return {
     owned: normalizeUltimateFields(created),
     isDuplicate: false,

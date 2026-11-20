@@ -36,16 +36,10 @@ export default function CharacterPreviewModal({ open, onClose, character }) {
             className="relative h-36 w-28 shrink-0 overflow-hidden rounded-xl border-2 border-black bg-[#0b161b]"
             style={{ boxShadow: "0 3px 0 0 #000" }}
           >
-            {character.image_url ? (
-              <img
-                src={character.image_url}
-                alt=""
-                className="h-full w-full object-cover object-[center_18%]"
-                draggable={false}
-              />
-            ) : (
-              <CharacterArt character={character} className="h-full w-full" />
-            )}
+            <CharacterArt
+              character={character}
+              className="h-full w-full object-cover object-[center_18%]"
+            />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">

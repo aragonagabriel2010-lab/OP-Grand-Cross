@@ -103,8 +103,9 @@ function scheduleCloudPersist(save) {
   if (session.writeTimer) clearTimeout(session.writeTimer);
   session.writeTimer = setTimeout(() => {
     session.writeTimer = null;
+    const latest = getWorkingSave();
     const payload = {
-      ...save,
+      ...latest,
       battleStats: loadBattleStats(),
     };
     session.writeChain = session.writeChain
@@ -113,6 +114,75 @@ function scheduleCloudPersist(save) {
         console.error("[Firestore] salvataggio fallito", err);
       });
   }, 350);
+}
+
+/** Svuota il debounce e scrive subito su Firestore (gacha / azioni critiche). */
+async function flushPendingCloudWrite() {
+  if (session.writeTimer) {
+    clearTimeout(session.writeTimer);
+    session.writeTimer = null;
+  }
+  if (!session.uid || !canUseFirestore()) {
+    await session.writeChain.catch(() => {});
+    return;
+  }
+  const latest = getWorkingSave();
+  const payload = {
+    ...latest,
+    battleStats: loadBattleStats(),
+  };
+  session.writeChain = session.writeChain
+    .then(() => persistPlayerSave(session.uid, payload))
+    .catch((err) => {
+      console.error("[Firestore] flush fallito", err);
+    });
+  await session.writeChain;
+}
+
+/**
+ * Unisce cache locale e cloud: non perdere carte appena pescate
+ * se il cloud è ancora indietro sul debounce.
+ */
+function mergePlayerSaves(local, cloud) {
+  const localSave = local || emptySave();
+  const cloudSave = cloud || emptySave();
+
+  const ownedById = new Map();
+  for (const row of [...(cloudSave.ownedCharacters || []), ...(localSave.ownedCharacters || [])]) {
+    if (!row?.id) continue;
+    const prev = ownedById.get(row.id);
+    if (!prev || String(row.updated_date || "") >= String(prev.updated_date || "")) {
+      ownedById.set(row.id, row);
+    }
+  }
+
+  const cloudPs = cloudSave.playerStates?.[0] || null;
+  const localPs = localSave.playerStates?.[0] || null;
+  let playerStates = cloudSave.playerStates?.length ? [...cloudSave.playerStates] : [];
+  if (localPs && cloudPs) {
+    const localNewer = String(localPs.updated_date || "") >= String(cloudPs.updated_date || "");
+    const localSpentMore =
+      Number(localPs.strawberry ?? Infinity) < Number(cloudPs.strawberry ?? Infinity) ||
+      Number(localPs.berry ?? Infinity) < Number(cloudPs.berry ?? Infinity);
+    if (localNewer || localSpentMore) {
+      playerStates = [
+        {
+          ...cloudPs,
+          ...localPs,
+          id: cloudPs.id || localPs.id,
+          created_by_id: cloudPs.created_by_id || localPs.created_by_id,
+        },
+      ];
+    }
+  } else if (localPs && !cloudPs) {
+    playerStates = [localPs];
+  }
+
+  return {
+    playerStates,
+    ownedCharacters: [...ownedById.values()],
+    battleStats: localSave.battleStats || cloudSave.battleStats || null,
+  };
 }
 
 async function commitSave(save) {
@@ -134,11 +204,8 @@ async function commitSave(save) {
  */
 export function bindAuthUser(mappedUser) {
   session.bindPromise = (async () => {
-    if (session.writeTimer) {
-      clearTimeout(session.writeTimer);
-      session.writeTimer = null;
-    }
-    await session.writeChain.catch(() => {});
+    // Flush prima di rileggere il cloud: evita di buttare pull gacha non ancora syncati
+    await flushPendingCloudWrite();
 
     if (!mappedUser?.uid) {
       session.uid = null;
@@ -159,26 +226,44 @@ export function bindAuthUser(mappedUser) {
       }
     }
 
+    const legacy = readCache(LEGACY_SAVE_KEY);
+    const personal = readCache(cacheKey(mappedUser.uid));
+    const localSource =
+      personal.playerStates.length || personal.ownedCharacters.length
+        ? personal
+        : legacy;
+    const localRemapped = remapOwner(localSource, mappedUser.uid);
+
     const hasCloud =
       cloud &&
       ((cloud.playerStates && cloud.playerStates.length > 0) ||
         (cloud.ownedCharacters && cloud.ownedCharacters.length > 0));
 
     if (hasCloud) {
-      session.save = {
-        playerStates: cloud.playerStates,
-        ownedCharacters: cloud.ownedCharacters,
-        battleStats: cloud.battleStats || null,
-      };
+      session.save = mergePlayerSaves(localRemapped, cloud);
+      // Se la cache locale aveva pezzi/valute più freschi, riscrivi il cloud
+      const mergedMoreOwned =
+        (session.save.ownedCharacters?.length || 0) > (cloud.ownedCharacters?.length || 0);
+      const mergedSpent =
+        session.save.playerStates?.[0] &&
+        cloud.playerStates?.[0] &&
+        (Number(session.save.playerStates[0].strawberry ?? 0) <
+          Number(cloud.playerStates[0].strawberry ?? 0) ||
+          Number(session.save.playerStates[0].berry ?? 0) <
+            Number(cloud.playerStates[0].berry ?? 0));
+      if (canUseFirestore() && (mergedMoreOwned || mergedSpent)) {
+        try {
+          await persistPlayerSave(mappedUser.uid, {
+            ...session.save,
+            battleStats: session.save.battleStats || loadBattleStats(),
+          });
+        } catch (err) {
+          console.error("[Firestore] merge post-bind fallito", err);
+        }
+      }
     } else {
       // Migra progressi locali verso il cloud al primo accesso
-      const legacy = readCache(LEGACY_SAVE_KEY);
-      const personal = readCache(cacheKey(mappedUser.uid));
-      const source =
-        personal.playerStates.length || personal.ownedCharacters.length
-          ? personal
-          : legacy;
-      session.save = remapOwner(source, mappedUser.uid);
+      session.save = localRemapped;
       if (canUseFirestore() && (session.save.playerStates.length || session.save.ownedCharacters.length)) {
         try {
           await persistPlayerSave(mappedUser.uid, {
@@ -214,26 +299,12 @@ export function whenSaveReady() {
   return session.bindPromise;
 }
 
-/** Forza un push su Firestore (es. dopo update stats). */
+/** Forza un push su Firestore (es. dopo gacha / update stats). */
 export async function syncCloudSave() {
   await whenSaveReady();
   if (!session.uid || !canUseFirestore()) return;
-  if (session.writeTimer) {
-    clearTimeout(session.writeTimer);
-    session.writeTimer = null;
-  }
-  const save = {
-    ...getWorkingSave(),
-    battleStats: loadBattleStats(),
-  };
-  session.save = save;
-  writeCache(cacheKey(session.uid), save);
-  session.writeChain = session.writeChain
-    .then(() => persistPlayerSave(session.uid, save))
-    .catch((err) => {
-      console.error("[Firestore] sync fallito", err);
-    });
-  await session.writeChain;
+  writeCache(cacheKey(session.uid), getWorkingSave());
+  await flushPendingCloudWrite();
 }
 
 function catalogEntity(rows) {

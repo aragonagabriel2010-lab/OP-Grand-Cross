@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { assetUrl } from "@/lib/assets";
 import RarityStars from "./RarityStars";
 import { ATTRIBUTE_INFO, RARITY_GLOW } from "@/lib/gameUtils";
 import { AttributeIcon } from "@/components/game/AttributeIcons";
@@ -10,12 +11,9 @@ import { AttributeIcon } from "@/components/game/AttributeIcons";
 export function CharacterArt({ character, className, variant = "avatar" }) {
   const raw = character?.image_url;
   if (raw) {
-    const src = raw.startsWith("http")
-      ? raw
-      : `${import.meta.env.BASE_URL}${raw.replace(/^\//, "")}`;
     return (
       <img
-        src={src}
+        src={assetUrl(raw)}
         alt={character.char_name}
         className={cn("object-contain object-center", className)}
         draggable={false}

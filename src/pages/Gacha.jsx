@@ -19,6 +19,8 @@ import { addCharacter } from "@/lib/ultimate";
 import { loadPity, savePity, rollRarityWithPity } from "@/lib/gachaPity";
 import { AudioManager } from "@/lib/AudioManager";
 import { hasUnlock } from "@/lib/rank";
+import { syncCloudSave } from "@/lib/localDb";
+import { toast } from "@/components/ui/use-toast";
 
 export default function Gacha() {
   const { loading, characters, playerState, refresh, patchPlayerState } = useGame();
@@ -65,64 +67,107 @@ export default function Gacha() {
   async function pull(count) {
     const cost = count === 10 ? tenCost : 30;
     if (playerState.strawberry < cost || pulling) return;
+    if (!pool.length) {
+      toast({
+        title: "Gacha non disponibile",
+        description: "Catalogo personaggi vuoto. Riprova tra poco.",
+        variant: "warning",
+      });
+      return;
+    }
+
     setPulling(true);
     setFlipPhase(true);
     AudioManager.playUlt();
 
-    const nextStrawberry = playerState.strawberry - cost;
-    patchPlayerState?.({ strawberry: nextStrawberry });
-    await db.entities.PlayerState.update(playerState.id, {
-      strawberry: nextStrawberry,
-    });
+    const prevStrawberry = playerState.strawberry;
+    const nextStrawberry = prevStrawberry - cost;
+    let spent = false;
 
-    let pityState = loadPity(uid);
-    const pulled = [];
-    for (let i = 0; i < count; i++) {
-      const { rarity, pity: nextPity } = rollRarityWithPity(pityState, rollRarity);
-      pityState = nextPity;
-      let candidates = pool.filter((c) => c.rarity === rarity);
-      if (candidates.length === 0) candidates = pool;
-      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-      const result = await addCharacter(chosen.id);
-      pulled.push({
-        ...chosen,
-        isDuplicate: result.isDuplicate,
-        tokensGained: result.tokensGained,
+    try {
+      patchPlayerState?.({ strawberry: nextStrawberry });
+      await db.entities.PlayerState.update(playerState.id, {
+        strawberry: nextStrawberry,
       });
-    }
-    if (count === 10 && !pulled.some((c) => ["SR", "SSR"].includes(c.rarity))) {
-      const srPool = pool.filter((c) => ["SR", "SSR"].includes(c.rarity));
-      if (srPool.length) {
-        const replace = srPool[Math.floor(Math.random() * srPool.length)];
-        const result = await addCharacter(replace.id);
-        pulled[pulled.length - 1] = {
-          ...replace,
+      spent = true;
+
+      let pityState = loadPity(uid);
+      const pulled = [];
+      for (let i = 0; i < count; i++) {
+        const { rarity, pity: nextPity } = rollRarityWithPity(pityState, rollRarity);
+        pityState = nextPity;
+        let candidates = pool.filter((c) => c.rarity === rarity);
+        if (candidates.length === 0) candidates = pool;
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        if (!chosen?.id) {
+          throw new Error("Nessun personaggio valido nel pool gacha");
+        }
+        const result = await addCharacter(chosen.id);
+        pulled.push({
+          ...chosen,
           isDuplicate: result.isDuplicate,
           tokensGained: result.tokensGained,
-        };
-        pityState = { ...pityState, sinceSr: 0 };
-        if (replace.rarity === "SSR") pityState.sinceSsr = 0;
+        });
       }
-    }
+      if (count === 10 && !pulled.some((c) => ["SR", "SSR"].includes(c.rarity))) {
+        const srPool = pool.filter((c) => ["SR", "SSR"].includes(c.rarity));
+        if (srPool.length) {
+          const replace = srPool[Math.floor(Math.random() * srPool.length)];
+          const result = await addCharacter(replace.id);
+          pulled[pulled.length - 1] = {
+            ...replace,
+            isDuplicate: result.isDuplicate,
+            tokensGained: result.tokensGained,
+          };
+          pityState = { ...pityState, sinceSr: 0 };
+          if (replace.rarity === "SSR") pityState.sinceSsr = 0;
+        }
+      }
 
-    savePity(uid, pityState);
-    setPity(pityState);
-    setResults(pulled);
-    recordGachaPull(count);
-    try {
-      const { bumpDaily } = await import("@/lib/dailies");
-      bumpDaily(uid, "gacha_pull", count);
-      if (count >= 10) bumpDaily(uid, "gacha_ten");
-      bumpDaily(uid, "open_gacha");
-    } catch {
-      /* ignore */
-    }
+      savePity(uid, pityState);
+      setPity(pityState);
+      setResults(pulled);
+      recordGachaPull(count);
+      try {
+        const { bumpDaily } = await import("@/lib/dailies");
+        bumpDaily(uid, "gacha_pull", count);
+        if (count >= 10) bumpDaily(uid, "gacha_ten");
+        bumpDaily(uid, "open_gacha");
+      } catch {
+        /* ignore */
+      }
 
-    await new Promise((r) => setTimeout(r, 900));
-    setFlipPhase(false);
-    setShowModal(true);
-    setPulling(false);
-    refresh();
+      // Critico: sync immediato così un refresh/auth non ripristina un cloud vecchio
+      await syncCloudSave();
+
+      await new Promise((r) => setTimeout(r, 900));
+      setFlipPhase(false);
+      setShowModal(true);
+      refresh();
+    } catch (err) {
+      console.error("[gacha] pull fallita", err);
+      if (spent) {
+        // Non rimborsiamo alla cieca se alcune carte sono già state create:
+        // sync comunque lo stato locale e avvisa.
+        try {
+          await syncCloudSave();
+        } catch {
+          /* ignore */
+        }
+      } else {
+        patchPlayerState?.({ strawberry: prevStrawberry });
+      }
+      setFlipPhase(false);
+      toast({
+        title: "Estrazione interrotta",
+        description:
+          "Si è verificato un errore. Controlla l’inventario personaggi: le carte già assegnate restano salvate.",
+        variant: "warning",
+      });
+      refresh();
+    } finally {
+      setPulling(false);
+    }
   }
 
   return (

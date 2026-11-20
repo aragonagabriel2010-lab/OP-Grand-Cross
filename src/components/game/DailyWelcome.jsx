@@ -16,11 +16,8 @@ import {
 import { mergeMaterials, normalizeMaterials } from "@/lib/materials";
 import { Gem, Coins, Gift, Hexagon, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { assetUrl as asset } from "@/lib/assets";
 import { AudioManager } from "@/lib/AudioManager";
-
-function asset(path) {
-  return `${import.meta.env.BASE_URL}${String(path).replace(/^\//, "")}`;
-}
 
 function rewardLines(reward) {
   if (!reward) return [];

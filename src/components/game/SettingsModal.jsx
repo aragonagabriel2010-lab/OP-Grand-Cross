@@ -357,7 +357,7 @@ export default function SettingsModal({ open, onClose, initialTab = "account" })
                       onChange={(sfx) => patchAudio({ sfx })}
                     />
                     <p className="text-[9px] uppercase tracking-wide text-white/40">
-                      Preferenze salvate in locale. Gli SFX UI usano il canale Effetti.
+                      Preferenze salvate in locale. Musica hub al primo tocco · SFX sul canale Effetti.
                     </p>
                   </div>
                 )}

@@ -85,6 +85,26 @@
     @apply border-border outline-ring/50;
   }
 
+  html,
+  body,
+  #root {
+    /* Niente evidenziazione testo al doppio tap (popup browser / iOS) */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Selezione solo dove serve digitare / copiare a mano */
+  input,
+  textarea,
+  [contenteditable="true"],
+  .allow-select {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
   body {
     @apply font-body;
     background-color: var(--theme-bg);

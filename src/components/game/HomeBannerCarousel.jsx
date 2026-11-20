@@ -2,11 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-
-function asset(path) {
-  const clean = String(path || "").replace(/^\//, "");
-  return `${import.meta.env.BASE_URL}${clean}`;
-}
+import { assetUrl as asset } from "@/lib/assets";
 
 const BANNERS = [
   {
