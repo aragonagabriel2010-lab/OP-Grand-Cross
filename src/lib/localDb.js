@@ -116,15 +116,15 @@ function scheduleCloudPersist(save) {
   }, 350);
 }
 
-/** Svuota il debounce e scrive subito su Firestore (gacha / azioni critiche). */
-async function flushPendingCloudWrite() {
-  if (session.writeTimer) {
-    clearTimeout(session.writeTimer);
-    session.writeTimer = null;
-  }
+/** Scrive subito il save corrente su Firestore. */
+async function persistNow() {
   if (!session.uid || !canUseFirestore()) {
     await session.writeChain.catch(() => {});
     return;
+  }
+  if (session.writeTimer) {
+    clearTimeout(session.writeTimer);
+    session.writeTimer = null;
   }
   const latest = getWorkingSave();
   const payload = {
@@ -139,9 +139,23 @@ async function flushPendingCloudWrite() {
   await session.writeChain;
 }
 
+/** Svuota solo se c’è un debounce in sospeso (bind: non calpestare edit Firebase). */
+async function flushPendingCloudWrite() {
+  if (!session.writeTimer) {
+    await session.writeChain.catch(() => {});
+    return;
+  }
+  await persistNow();
+}
+
+function ownedIds(save) {
+  return new Set((save?.ownedCharacters || []).map((r) => r?.id).filter(Boolean));
+}
+
 /**
- * Unisce cache locale e cloud: non perdere carte appena pescate
- * se il cloud è ancora indietro sul debounce.
+ * Unisce cache locale e cloud.
+ * Regola: se esiste un save Firebase, playerStates (fragole/beri/stamina/progressi)
+ * vengono SOLO dal cloud. La cache locale può solo aggiungere carte owned non ancora syncate.
  */
 function mergePlayerSaves(local, cloud) {
   const localSave = local || emptySave();
@@ -158,30 +172,13 @@ function mergePlayerSaves(local, cloud) {
 
   const cloudPs = cloudSave.playerStates?.[0] || null;
   const localPs = localSave.playerStates?.[0] || null;
-  let playerStates = cloudSave.playerStates?.length ? [...cloudSave.playerStates] : [];
-  if (localPs && cloudPs) {
-    const localNewer = String(localPs.updated_date || "") >= String(cloudPs.updated_date || "");
-    const localSpentMore =
-      Number(localPs.strawberry ?? Infinity) < Number(cloudPs.strawberry ?? Infinity) ||
-      Number(localPs.berry ?? Infinity) < Number(cloudPs.berry ?? Infinity);
-    if (localNewer || localSpentMore) {
-      playerStates = [
-        {
-          ...cloudPs,
-          ...localPs,
-          id: cloudPs.id || localPs.id,
-          created_by_id: cloudPs.created_by_id || localPs.created_by_id,
-        },
-      ];
-    }
-  } else if (localPs && !cloudPs) {
-    playerStates = [localPs];
-  }
+  // Cloud assoluto per il wallet: gli edit console devono restare
+  let playerStates = cloudPs ? [{ ...cloudPs }] : localPs ? [{ ...localPs }] : [];
 
   return {
     playerStates,
     ownedCharacters: [...ownedById.values()],
-    battleStats: localSave.battleStats || cloudSave.battleStats || null,
+    battleStats: cloudSave.battleStats || localSave.battleStats || null,
   };
 }
 
@@ -241,20 +238,16 @@ export function bindAuthUser(mappedUser) {
 
     if (hasCloud) {
       session.save = mergePlayerSaves(localRemapped, cloud);
-      // Se la cache locale aveva pezzi/valute più freschi, riscrivi il cloud
-      const mergedMoreOwned =
-        (session.save.ownedCharacters?.length || 0) > (cloud.ownedCharacters?.length || 0);
-      const mergedSpent =
-        session.save.playerStates?.[0] &&
-        cloud.playerStates?.[0] &&
-        (Number(session.save.playerStates[0].strawberry ?? 0) <
-          Number(cloud.playerStates[0].strawberry ?? 0) ||
-          Number(session.save.playerStates[0].berry ?? 0) <
-            Number(cloud.playerStates[0].berry ?? 0));
-      if (canUseFirestore() && (mergedMoreOwned || mergedSpent)) {
+      const cloudOwned = ownedIds(cloud);
+      const mergedExtraOwned = (session.save.ownedCharacters || []).some(
+        (r) => r?.id && !cloudOwned.has(r.id)
+      );
+      // Solo carte locali mancanti sul cloud — mai riscrivere il wallet cloud con la cache
+      if (canUseFirestore() && mergedExtraOwned) {
         try {
           await persistPlayerSave(mappedUser.uid, {
             ...session.save,
+            playerStates: cloud.playerStates,
             battleStats: session.save.battleStats || loadBattleStats(),
           });
         } catch (err) {
@@ -304,7 +297,18 @@ export async function syncCloudSave() {
   await whenSaveReady();
   if (!session.uid || !canUseFirestore()) return;
   writeCache(cacheKey(session.uid), getWorkingSave());
-  await flushPendingCloudWrite();
+  await persistNow();
+}
+
+// All’uscita tab/pagina: non lasciare debounce a metà
+if (typeof window !== "undefined") {
+  const flushOnLeave = () => {
+    if (session.writeTimer) void flushPendingCloudWrite();
+  };
+  window.addEventListener("pagehide", flushOnLeave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushOnLeave();
+  });
 }
 
 function catalogEntity(rows) {
